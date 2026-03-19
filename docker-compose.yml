@@ -1,0 +1,49 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      # NEWSAPI_KEY is read from a .env file at the repo root (never committed).
+      # Create it with: echo "NEWSAPI_KEY=your_key_here" > .env
+      - NEWSAPI_KEY=${NEWSAPI_KEY}
+      # Phase 4: Go calls the ML service at this address. The service name
+      # "ml-service" resolves within the Docker network automatically —
+      # Docker's embedded DNS maps service names to container IPs.
+      - ML_SERVICE_URL=http://ml-service:8001
+    depends_on:
+      ml-service:
+        # Wait until ml-service passes its healthcheck before starting the
+        # backend. Without this, the Phase 4 startup goroutine could call
+        # /analyze before models have finished loading (~10s).
+        condition: service_healthy
+    restart: unless-stopped
+
+  ml-service:
+    build:
+      context: ./ml-service
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+    healthcheck:
+      # curl -f returns a non-zero exit code on HTTP errors, which Docker
+      # treats as a failed health check. The /health endpoint returns 200
+      # only after the Analyzer is fully initialized (models loaded).
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # start_period gives the container time to load models before Docker
+      # starts counting failed health checks against the retry limit.
+      # all-MiniLM-L6-v2 + spaCy load in ~10s; 30s is a comfortable buffer.
+      start_period: 30s
+
+# All services share this network. Service names resolve as hostnames:
+#   backend → http://backend:8080
+#   ml-service → http://ml-service:8001
+# The frontend (Phase 7) will join the same network.
+networks:
+  default:
+    name: olds-network

@@ -1,0 +1,10 @@
+# Environment variables — never commit API keys
+.env
+*.env
+
+# Go build output
+backend/server
+backend/tmp/
+
+# macOS
+.DS_Store
