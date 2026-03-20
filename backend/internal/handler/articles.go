@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/olds/backend/internal/article"
 	"github.com/olds/backend/internal/graph"
+	"github.com/olds/backend/internal/guardian"
 	"github.com/olds/backend/internal/mlclient"
 	"github.com/olds/backend/internal/newsapi"
 )
@@ -28,6 +29,9 @@ import (
 type ArticleHandler struct {
 	store  *article.Store
 	client *newsapi.Client
+	// guardianClient may be nil if GUARDIAN_KEY is not set — the handler
+	// degrades gracefully: only NewsAPI articles are ingested.
+	guardianClient *guardian.Client
 	// mlClient may be nil if ML_SERVICE_URL is not set — the handler
 	// degrades gracefully: articles are stored without entities/embedding.
 	mlClient *mlclient.Client
@@ -35,16 +39,23 @@ type ArticleHandler struct {
 }
 
 // NewArticleHandler constructs a handler with its dependencies injected.
-// mlClient may be nil (ML enrichment is skipped when unset).
+// guardianClient and mlClient may be nil — both degrade gracefully when absent.
 // This is called once in main.go — the handler is created, routes are
 // registered, and then the server runs.
 func NewArticleHandler(
 	store *article.Store,
 	client *newsapi.Client,
+	guardianClient *guardian.Client,
 	mlClient *mlclient.Client,
 	g *graph.Graph,
 ) *ArticleHandler {
-	return &ArticleHandler{store: store, client: client, mlClient: mlClient, graph: g}
+	return &ArticleHandler{
+		store:          store,
+		client:         client,
+		guardianClient: guardianClient,
+		mlClient:       mlClient,
+		graph:          g,
+	}
 }
 
 // List handles GET /articles.

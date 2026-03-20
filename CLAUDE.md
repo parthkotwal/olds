@@ -124,19 +124,12 @@ Build vertically, not horizontally. Get a thin slice working end-to-end before e
 - Commit messages: imperative mood, concise (`Add article ingestion endpoint`, not `Added some stuff`)
 - Every PR-worthy chunk of work should leave the project in a runnable state
 
-## Skills (Install via Plugin Marketplace)
+## Skills
 
-Install the Anthropic skills plugin marketplace, then install these relevant skills:
+Skill definitions live in `.claude/skills/`. Use the `Skill` tool to invoke them.
 
-```
-/plugin marketplace add anthropics/skills
-/plugin install frontend-design@anthropic-agent-skills
-/plugin install webapp-testing@anthropic-agent-skills
-```
-
-### When to use each skill:
-- **frontend-design** — Use when building any React component, page, or UI element for the frontend. This produces polished, production-grade interfaces. Invoke it whenever creating or restyling components in `frontend/`.
-- **webapp-testing** — Use when testing the frontend or any web-facing part of the application with Playwright. Invoke it when I ask to test the UI or verify that a feature works end-to-end in the browser.
+- **frontend-design** (`.claude/skills/frontend-design/SKILL.md`) — Use when building any React component, page, or UI element for the frontend. Invoke it whenever creating or restyling components in `frontend/`.
+- **webapp-testing** (`.claude/skills/webapp-testing/SKILL.md`) — Use when testing the frontend or any web-facing part of the application with Playwright. Invoke it when asked to test the UI or verify a feature end-to-end in the browser.
 
 ## What This Demonstrates on a Resume
 

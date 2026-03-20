@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/olds/backend/internal/article"
 	"github.com/olds/backend/internal/graph"
+	"github.com/olds/backend/internal/guardian"
 	"github.com/olds/backend/internal/handler"
 	"github.com/olds/backend/internal/mlclient"
 	"github.com/olds/backend/internal/newsapi"
@@ -34,6 +35,17 @@ func main() {
 	store := article.NewStore()
 	client := newsapi.NewClient(apiKey)
 
+	// Guardian client is optional — if GUARDIAN_KEY is unset, only NewsAPI
+	// articles are ingested. When set, Guardian provides full article body text
+	// (unlike NewsAPI's free tier which truncates at ~200 characters).
+	var guardianClient *guardian.Client
+	if guardianKey := os.Getenv("GUARDIAN_KEY"); guardianKey != "" {
+		guardianClient = guardian.NewClient(guardianKey)
+		log.Println("Guardian API configured — full article text enabled")
+	} else {
+		log.Println("GUARDIAN_KEY not set — Guardian ingestion disabled")
+	}
+
 	// ML client is optional — if ML_SERVICE_URL is unset the backend runs
 	// without enrichment (Phase 1/2 compatibility). When the full stack is
 	// running via docker-compose, ML_SERVICE_URL is always set.
@@ -50,13 +62,40 @@ func main() {
 	// truth for article data; the Graph owns the connection topology.
 	g := graph.NewGraph()
 
-	articleHandler := handler.NewArticleHandler(store, client, mlClient, g)
+	articleHandler := handler.NewArticleHandler(store, client, guardianClient, mlClient, g)
 
 	// ── 3. Register routes ───────────────────────────────────────────────────
 	r := gin.Default()
 
+	// CORS middleware — required so the frontend (localhost:5173) can call the
+	// backend (localhost:8080) without the browser blocking cross-origin requests.
+	//
+	// In Go, middleware is a function that wraps a handler. gin.Default() gives
+	// us Logger and Recovery; we add CORS by calling r.Use() with our own
+	// middleware function. r.Use() registers middleware that runs for every request.
+	//
+	// The middleware pattern in Go:
+	//   - c.Header() sets a response header
+	//   - c.AbortWithStatus() stops the middleware chain and returns immediately
+	//   - c.Next() passes control to the next handler in the chain
+	//
+	// OPTIONS is the HTTP "preflight" request that browsers send before any
+	// cross-origin POST or GET with custom headers. We need to handle it here
+	// or the browser will block the actual request before it reaches our handlers.
+	r.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Content-Type")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
+
 	r.GET("/health", handler.Health)
 	r.GET("/articles", articleHandler.List)
+	r.GET("/articles/:id/connections", articleHandler.Connections)
 	r.POST("/ingest", articleHandler.Ingest)
 
 	// ── 4. Start background ingestion goroutine ───────────────────────────────

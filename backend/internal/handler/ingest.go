@@ -28,6 +28,19 @@ func (h *ArticleHandler) Ingest(c *gin.Context) {
 		return
 	}
 
+	// Also fetch from The Guardian if the client is configured.
+	// Guardian articles are appended to the same slice — the enrichment
+	// pipeline and graph treat them identically to NewsAPI articles.
+	if h.guardianClient != nil {
+		guardianArticles, err := h.guardianClient.FetchAll()
+		if err != nil {
+			// Log but don't abort — partial results from NewsAPI are still useful.
+			log.Printf("ingest: guardian fetch failed: %v", err)
+		} else {
+			articles = append(articles, guardianArticles...)
+		}
+	}
+
 	// Enrich articles with ML data (entities + embedding) if the ML client
 	// is configured. Enrichment is best-effort — failure logs a warning but
 	// does not prevent the article from being stored.
@@ -37,8 +50,8 @@ func (h *ArticleHandler) Ingest(c *gin.Context) {
 	h.graph.Add(enriched)
 
 	c.JSON(http.StatusOK, gin.H{
-		"ingested": len(enriched),
-		"total":    h.store.Count(),
+		"ingested":    len(enriched),
+		"total":       h.store.Count(),
 		"graph_nodes": h.graph.NodeCount(),
 		"graph_edges": h.graph.EdgeCount(),
 	})
@@ -56,6 +69,17 @@ func (h *ArticleHandler) RunStartupIngest() error {
 	articles, err := h.client.FetchAll()
 	if err != nil {
 		return fmt.Errorf("startup ingest: fetch failed: %w", err)
+	}
+
+	if h.guardianClient != nil {
+		guardianArticles, err := h.guardianClient.FetchAll()
+		if err != nil {
+			// Non-fatal: log and continue with NewsAPI articles only.
+			log.Printf("startup ingest: guardian fetch failed: %v", err)
+		} else {
+			articles = append(articles, guardianArticles...)
+			log.Printf("startup ingest: fetched %d guardian articles", len(guardianArticles))
+		}
 	}
 
 	enriched := enrich(articles, h)

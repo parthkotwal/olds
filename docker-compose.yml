@@ -9,6 +9,7 @@ services:
       # NEWSAPI_KEY is read from a .env file at the repo root (never committed).
       # Create it with: echo "NEWSAPI_KEY=your_key_here" > .env
       - NEWSAPI_KEY=${NEWSAPI_KEY}
+      - GUARDIAN_KEY=${GUARDIAN_KEY}
       # Phase 4: Go calls the ML service at this address. The service name
       # "ml-service" resolves within the Docker network automatically —
       # Docker's embedded DNS maps service names to container IPs.
@@ -40,10 +41,24 @@ services:
       # all-MiniLM-L6-v2 + spaCy load in ~10s; 30s is a comfortable buffer.
       start_period: 30s
 
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      # The browser makes API calls to this URL — it must be reachable from
+      # the user's machine, not from inside Docker. So we use localhost:8080
+      # (the host-mapped backend port), not http://backend:8080 (internal DNS).
+      - VITE_API_BASE_URL=http://localhost:8080
+    depends_on:
+      - backend
+    restart: unless-stopped
+
 # All services share this network. Service names resolve as hostnames:
-#   backend → http://backend:8080
+#   backend    → http://backend:8080
 #   ml-service → http://ml-service:8001
-# The frontend (Phase 7) will join the same network.
+#   frontend   → http://frontend:5173 (served to browser via localhost:5173)
 networks:
   default:
     name: olds-network

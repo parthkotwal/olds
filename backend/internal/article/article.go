@@ -43,6 +43,10 @@ type Article struct {
 	// RawText stores the article body text for later use by the ML service
 	// (Phase 3/4). omitempty means this field is omitted from JSON when empty —
 	// the frontend doesn't need it, and it keeps responses small.
+	// ImageURL is the article's lead image, provided by NewsAPI (urlToImage)
+	// or The Guardian (fields.thumbnail). Optional — not all articles have one.
+	ImageURL string `json:"image_url,omitempty"`
+
 	RawText string `json:"raw_text,omitempty"`
 
 	// Entities and Embedding are populated by the ML service (Phase 4).
@@ -137,6 +141,17 @@ func (s *Store) GetByCategory(category string) []Article {
 	// will marshal a nil slice as null. We handle this at the handler level
 	// by using a typed empty slice when nil.
 	return result
+}
+
+// GetByID returns the article with the given ID and a boolean indicating
+// whether it was found. The second return value (ok idiom) is Go's standard
+// way to distinguish "not found" from an error — analogous to Python's
+// dict.get(key, None) but with an explicit presence signal instead of None.
+func (s *Store) GetByID(id string) (Article, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	a, ok := s.articles[id]
+	return a, ok
 }
 
 // Count returns the number of articles currently in the store.

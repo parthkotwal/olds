@@ -60,6 +60,7 @@ type newsAPIArticle struct {
 	Description string    `json:"description"`
 	URL         string    `json:"url"`
 	Content     string    `json:"content"`
+	URLToImage  string    `json:"urlToImage"` // lead image thumbnail; empty for many articles
 	Source      struct {
 		Name string `json:"name"`
 	} `json:"source"`
@@ -133,10 +134,11 @@ func (c *Client) FetchCategory(category string) ([]article.Article, error) {
 			Title:       a.Title,
 			Description: a.Description,
 			URL:         a.URL,
+			ImageURL:    a.URLToImage,
 			Source:      a.Source.Name,
 			Category:    category,
 			PublishedAt: a.PublishedAt,
-			RawText:     a.Content,
+			RawText:     a.Content, // free tier: truncated at ~200 chars with "[+N chars]"
 		})
 	}
 	return articles, nil
