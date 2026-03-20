@@ -96,6 +96,7 @@ func main() {
 	r.GET("/health", handler.Health)
 	r.GET("/articles", articleHandler.List)
 	r.GET("/articles/:id/connections", articleHandler.Connections)
+	r.GET("/ws/connections/:id", articleHandler.WSConnections)
 	r.POST("/ingest", articleHandler.Ingest)
 
 	// ── 4. Start background ingestion goroutine ───────────────────────────────

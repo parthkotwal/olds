@@ -1,3 +1,5 @@
+import ConnectionSidebar from './ConnectionSidebar'
+
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString('en-US', {
     year: 'numeric',
@@ -23,7 +25,7 @@ function formatDate(dateStr) {
 // Props:
 //   article  Article  — the article to display
 //   onBack   fn       — called when "Back to feed" is clicked
-export default function ArticleView({ article, onBack }) {
+export default function ArticleView({ article, onBack, onArticleClick }) {
   return (
     <div>
       {/* Back navigation */}
@@ -129,27 +131,25 @@ export default function ArticleView({ article, onBack }) {
           )}
         </article>
 
-        {/* ── Connection sidebar ──────────────────────────────────────────── */}
+        {/* ── Connection sidebar (desktop) ─────────────────────────────────── */}
         {/* Hidden on mobile — shown as a bottom section there instead.
-            On desktop: narrow column with thin vertical rule separator. */}
+            On desktop: narrow column separated by a thin vertical rule.
+            This is the design signature of Olds — marginalia, not a widget. */}
         <aside className="hidden lg:block w-56 flex-shrink-0 pl-8 border-l border-rule self-stretch">
           <div className="sticky top-24">
-            <div className="label-caps text-muted mb-5">Connections</div>
-            <p className="text-muted text-xs leading-relaxed mb-4">
-              As you read, related stories across different topics surface here.
-            </p>
-            <p className="text-muted text-xs leading-relaxed italic">
-              Real-time graph traversal via WebSocket — Phase 8.
-            </p>
+            <ConnectionSidebar
+              articleId={article.id}
+              onArticleClick={onArticleClick}
+            />
           </div>
         </aside>
 
-        {/* Mobile-only connections note — below article */}
+        {/* ── Connection sidebar (mobile) ──────────────────────────────────── */}
         <div className="lg:hidden mt-10 pt-6 border-t border-rule w-full">
-          <div className="label-caps text-muted mb-3">Connections</div>
-          <p className="text-muted text-xs leading-relaxed italic">
-            Cross-topic connections will appear here in real time — Phase 8.
-          </p>
+          <ConnectionSidebar
+            articleId={article.id}
+            onArticleClick={onArticleClick}
+          />
         </div>
       </div>
     </div>
