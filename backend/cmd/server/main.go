@@ -6,33 +6,71 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/olds/backend/internal/article"
+	"github.com/olds/backend/internal/behavior"
+	"github.com/olds/backend/internal/db"
 	"github.com/olds/backend/internal/graph"
 	"github.com/olds/backend/internal/guardian"
 	"github.com/olds/backend/internal/handler"
 	"github.com/olds/backend/internal/mlclient"
 	"github.com/olds/backend/internal/newsapi"
+	"github.com/olds/backend/internal/repository"
 )
 
 func main() {
 	// ── 1. Read and validate required configuration ───────────────────────────
-	// Fail fast if the API key is missing. It is better to crash at startup
-	// with a clear message than to start serving requests and fail silently
-	// on the first ingestion attempt.
+	// Fail fast if required config is missing. It is better to crash at startup
+	// with a clear message than to start serving requests and fail silently.
 	apiKey := os.Getenv("NEWSAPI_KEY")
 	if apiKey == "" {
 		log.Fatal("NEWSAPI_KEY environment variable is required")
 	}
 
-	// ── 2. Construct dependencies in order ───────────────────────────────────
-	// Build the dependency graph bottom-up: store and newsapi client have no
-	// dependencies on each other, so either order works. The handler
-	// depends on all three, so it is constructed last.
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL environment variable is required")
+	}
+
+	// ── 2. Run database migrations ────────────────────────────────────────────
+	// Apply any pending SQL migrations before opening the connection pool.
+	// runMigrations is idempotent — safe to call on every startup. It creates
+	// the schema_migrations table on first run and is a no-op thereafter.
+	//
+	// Migrations run before the pool is opened because the pool's type
+	// registration (pgvector) requires the vector extension to already exist
+	// in the database. Migrations create the extension; pool.Open reads it.
+	log.Println("running database migrations...")
+	if err := runMigrations(dbURL); err != nil {
+		log.Fatalf("database migration failed: %v", err)
+	}
+
+	// ── 3. Open the connection pool ───────────────────────────────────────────
+	// One pool per process, shared across all goroutines. db.Open also registers
+	// the pgvector type so that vector(384) columns can be scanned correctly.
+	//
+	// context.Background() is the root context for startup work that is not
+	// associated with any HTTP request. It is never cancelled.
+	pool, err := db.Open(context.Background(), dbURL)
+	if err != nil {
+		log.Fatalf("database connection failed: %v", err)
+	}
+	defer pool.Close()
+	log.Println("database connected")
+
+	// ── 4. Construct in-memory stores ────────────────────────────────────────
+	// These are created empty and then hydrated from Postgres before the server
+	// starts serving requests. They remain the runtime read path throughout the
+	// application lifetime.
 	store := article.NewStore()
+	g := graph.NewGraph()
+	bs := behavior.NewStore()
+
+	// ── 5. Construct API clients ──────────────────────────────────────────────
 	client := newsapi.NewClient(apiKey)
 
 	// Guardian client is optional — if GUARDIAN_KEY is unset, only NewsAPI
@@ -47,8 +85,8 @@ func main() {
 	}
 
 	// ML client is optional — if ML_SERVICE_URL is unset the backend runs
-	// without enrichment (Phase 1/2 compatibility). When the full stack is
-	// running via docker-compose, ML_SERVICE_URL is always set.
+	// without enrichment. When the full stack is running via docker-compose,
+	// ML_SERVICE_URL is always set.
 	var mlClient *mlclient.Client
 	if mlURL := os.Getenv("ML_SERVICE_URL"); mlURL != "" {
 		mlClient = mlclient.NewClient(mlURL)
@@ -57,14 +95,37 @@ func main() {
 		log.Println("ML_SERVICE_URL not set — article enrichment disabled")
 	}
 
-	// The graph is always constructed — it starts empty and fills as articles
-	// are ingested. It is separate from the Store: the Store is the source of
-	// truth for article data; the Graph owns the connection topology.
-	g := graph.NewGraph()
+	// ── 6. Construct repositories ─────────────────────────────────────────────
+	// Repositories own the SQL queries for persisting and loading data.
+	// They receive the pool and expose domain-typed methods (no raw SQL outside
+	// the repository package).
+	articleRepo := repository.NewArticleRepository(pool)
+	behaviorRepo := repository.NewBehaviorRepository(pool)
 
-	articleHandler := handler.NewArticleHandler(store, client, guardianClient, mlClient, g)
+	// ── 7. Hydrate in-memory stores from Postgres ─────────────────────────────
+	// HydrateFromDB runs synchronously before the HTTP server starts so that
+	// the very first request sees the full persisted state. The sequence is:
+	//   LoadAll → store.Add → graph.Add → LoadSignals → bs.BulkLoad
+	//
+	// Non-fatal: if hydration fails (e.g., fresh DB with no rows), the server
+	// starts with empty stores. The startup ingestion goroutine (step 9) will
+	// repopulate from the news APIs.
+	log.Println("hydrating in-memory stores from database...")
+	if err := repository.HydrateFromDB(
+		context.Background(),
+		articleRepo, behaviorRepo,
+		store, g, bs,
+	); err != nil {
+		log.Printf("hydration failed (starting with empty stores): %v", err)
+	}
 
-	// ── 3. Register routes ───────────────────────────────────────────────────
+	// ── 8. Construct the handler and register routes ──────────────────────────
+	articleHandler := handler.NewArticleHandler(
+		store, client, guardianClient, mlClient, g, bs,
+		articleRepo, behaviorRepo,
+	)
+
+	// ── 9. Register routes ────────────────────────────────────────────────────
 	r := gin.Default()
 
 	// CORS middleware — required so the frontend (localhost:5173) can call the
@@ -98,31 +159,31 @@ func main() {
 	r.GET("/articles/:id/connections", articleHandler.Connections)
 	r.GET("/ws/connections/:id", articleHandler.WSConnections)
 	r.POST("/ingest", articleHandler.Ingest)
+	r.POST("/behavior", articleHandler.RecordBehavior)
 
-	// ── 4. Start background ingestion goroutine ───────────────────────────────
+	// ── 10. Start background ingestion goroutine ──────────────────────────────
 	// `go func() { ... }()` launches an anonymous function as a goroutine —
 	// a lightweight concurrent execution unit managed by the Go runtime.
 	//
-	// Why not just call RunStartupIngest() here directly (before r.Run)?
-	// r.Run() blocks forever — it IS the server. If ingestion runs before it,
-	// the server is not listening during those 4 HTTP round-trips to NewsAPI
-	// and the subsequent ML calls. Launching a goroutine means the server
-	// starts immediately and answers requests (returning [] initially) while
-	// ingestion + enrichment happen in parallel.
+	// Why launch this after hydration? Hydration loads the persisted state;
+	// ingestion fetches fresh articles. By running ingestion after hydration,
+	// we avoid a race where fresh articles overwrite the hydrated state.
 	//
-	// articleHandler is a pointer — the goroutine captures it by reference.
-	// That is safe: the handler is fully constructed, never reassigned, and
-	// its internal store uses a RWMutex for concurrent access.
+	// Why still use a goroutine (not call directly)? r.Run() blocks forever —
+	// it IS the server. Calling ingestion directly before r.Run() would mean
+	// the server isn't listening while fetching/enriching all articles (~30s).
+	// A goroutine means the server starts immediately and serves the hydrated
+	// feed while new articles are fetched in parallel.
 	go func() {
 		log.Println("starting initial article ingestion...")
 		if err := articleHandler.RunStartupIngest(); err != nil {
 			log.Printf("initial ingestion failed: %v", err)
-			// Log and return — the server stays up with an empty store.
+			// Log and return — the server stays up with the hydrated store.
 			// Hit POST /ingest to retry once the issue is resolved.
 		}
 	}()
 
-	// ── 5. Start the HTTP server ──────────────────────────────────────────────
+	// ── 11. Start the HTTP server ─────────────────────────────────────────────
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"

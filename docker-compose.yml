@@ -6,19 +6,20 @@ services:
       - "8080:8080"
     environment:
       - PORT=8080
-      # NEWSAPI_KEY is read from a .env file at the repo root (never committed).
-      # Create it with: echo "NEWSAPI_KEY=your_key_here" > .env
+      # NEWSAPI_KEY and GUARDIAN_KEY are read from a .env file at the repo root (never committed).
+      # See .env.example for the full list of required variables.
       - NEWSAPI_KEY=${NEWSAPI_KEY}
       - GUARDIAN_KEY=${GUARDIAN_KEY}
-      # Phase 4: Go calls the ML service at this address. The service name
-      # "ml-service" resolves within the Docker network automatically —
-      # Docker's embedded DNS maps service names to container IPs.
+      # ML service: "ml-service" resolves within the Docker network via embedded DNS.
       - ML_SERVICE_URL=http://ml-service:8001
+      # Database: Supabase hosted Postgres. Connection string is in .env as SUPABASE_DATABASE_URL.
+      # The backend reads DATABASE_URL — it doesn't know or care whether that points to
+      # a local container or Supabase's hosted instance.
+      - DATABASE_URL=${SUPABASE_DATABASE_URL}
     depends_on:
       ml-service:
-        # Wait until ml-service passes its healthcheck before starting the
-        # backend. Without this, the Phase 4 startup goroutine could call
-        # /analyze before models have finished loading (~10s).
+        # Wait until ml-service passes its healthcheck before starting the backend.
+        # Without this, the startup goroutine could call /analyze before models load.
         condition: service_healthy
     restart: unless-stopped
 
@@ -29,16 +30,10 @@ services:
       - "8001:8001"
     restart: unless-stopped
     healthcheck:
-      # curl -f returns a non-zero exit code on HTTP errors, which Docker
-      # treats as a failed health check. The /health endpoint returns 200
-      # only after the Analyzer is fully initialized (models loaded).
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      # start_period gives the container time to load models before Docker
-      # starts counting failed health checks against the retry limit.
-      # all-MiniLM-L6-v2 + spaCy load in ~10s; 30s is a comfortable buffer.
       start_period: 30s
 
   frontend:
@@ -47,9 +42,8 @@ services:
     ports:
       - "5173:5173"
     environment:
-      # The browser makes API calls to this URL — it must be reachable from
-      # the user's machine, not from inside Docker. So we use localhost:8080
-      # (the host-mapped backend port), not http://backend:8080 (internal DNS).
+      # The browser makes API calls to this URL — must be reachable from the user's
+      # machine (localhost), not from inside Docker (http://backend:8080).
       - VITE_API_BASE_URL=http://localhost:8080
     depends_on:
       - backend

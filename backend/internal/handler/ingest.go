@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -49,6 +50,12 @@ func (h *ArticleHandler) Ingest(c *gin.Context) {
 	h.store.Add(enriched)
 	h.graph.Add(enriched)
 
+	// Persist to Postgres. Non-fatal: in-memory stores are already updated,
+	// so the feed is live even if the DB write fails. Log and continue.
+	if err := h.articleRepo.UpsertBatch(c.Request.Context(), enriched); err != nil {
+		log.Printf("ingest: DB persist failed: %v", err)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"ingested":    len(enriched),
 		"total":       h.store.Count(),
@@ -85,6 +92,14 @@ func (h *ArticleHandler) RunStartupIngest() error {
 	enriched := enrich(articles, h)
 	h.store.Add(enriched)
 	h.graph.Add(enriched)
+
+	// Persist to Postgres. context.Background() is used here because
+	// RunStartupIngest has no HTTP request context — it runs in a goroutine
+	// launched from main(). context.Background() is the idiomatic Go root
+	// context for work not associated with a specific request.
+	if err := h.articleRepo.UpsertBatch(context.Background(), enriched); err != nil {
+		log.Printf("startup ingest: DB persist failed: %v", err)
+	}
 
 	log.Printf("startup ingest: %d articles stored, graph: %d nodes / %d edges",
 		len(enriched), h.graph.NodeCount(), h.graph.EdgeCount())

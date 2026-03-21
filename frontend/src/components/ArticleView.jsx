@@ -1,4 +1,5 @@
 import ConnectionSidebar from './ConnectionSidebar'
+import { useBehaviorTracking } from '../hooks/useBehaviorTracking'
 
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString('en-US', {
@@ -26,6 +27,11 @@ function formatDate(dateStr) {
 //   article  Article  — the article to display
 //   onBack   fn       — called when "Back to feed" is clicked
 export default function ArticleView({ article, onBack, onArticleClick }) {
+  // Track reading signals — dwell time, scroll depth, re-opens.
+  // This hook fires immediately on mount (reopen signal) and sends
+  // dwell + scroll_depth to the backend when the component unmounts.
+  useBehaviorTracking(article)
+
   return (
     <div>
       {/* Back navigation */}
