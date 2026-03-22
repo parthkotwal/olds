@@ -65,6 +65,10 @@ body {
    Using vanilla CSS nth-child rules here rather than Tailwind arbitrary
    variants — much cleaner for a responsive multi-column rule pattern.
 
+   align-items: start → cards are their natural height, not stretched to row
+   height. Without this, text-only cards (shorter than image cards in the same
+   row) would have an awkward block of empty space at the bottom.
+
    Mobile (1 col): only horizontal rules between articles.
    Tablet (2 col): vertical rule after every odd item.
    Desktop (3 col): vertical rule after every item that isn't the last in its row.
@@ -96,4 +100,33 @@ body {
   .article-grid > article:not(:nth-child(2n)) {
     border-right: 1px solid var(--color-rule);
   }
+}
+
+/* ── Animation keyframes ─────────────────────────────────────────────────────
+   Three named animations used across the UI.
+   All are restrained — opacity-only, no transform, no bounce.
+*/
+
+/* Used by ConnectionSidebar skeleton lines while graph is traversing */
+@keyframes pulse {
+  0%, 100% { opacity: 0.18; }
+  50%       { opacity: 0.38; }
+}
+
+/* Used by feed article cards on first load — staggered per card */
+@keyframes articleFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Used by the connection groups when they arrive from the WebSocket */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Used by the login modal panel appearing */
+@keyframes modalSlideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }

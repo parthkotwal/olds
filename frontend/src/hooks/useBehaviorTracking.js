@@ -24,8 +24,10 @@ const SCROLL_THROTTLE_MS = 500
  * re-renders on every scroll event.
  *
  * @param {object|null} article — the article being viewed (null = not viewing)
+ * @param {string} token — Supabase JWT from session.access_token, forwarded
+ *   to sendBehaviorEvent so the backend can attach a user ID to each event.
  */
-export function useBehaviorTracking(article) {
+export function useBehaviorTracking(article, token) {
   // useRef holds mutable values that should NOT trigger re-renders when updated.
   // This is different from useState — changing a ref never causes a re-render.
   const openedAtRef = useRef(null)
@@ -42,11 +44,7 @@ export function useBehaviorTracking(article) {
     // ── Reopen signal — fires immediately ───────────────────────────────────
     // Every open is tracked, including re-opens. The backend increments a
     // counter; articles opened multiple times surface higher in the feed.
-    sendBehaviorEvent({
-      article_id: article.id,
-      type: 'reopen',
-      value: 1,
-    })
+    sendBehaviorEvent({ article_id: article.id, type: 'reopen', value: 1 }, token)
 
     // ── Scroll depth tracking ───────────────────────────────────────────────
     function handleScroll() {
@@ -88,17 +86,12 @@ export function useBehaviorTracking(article) {
       // Only send signals if the user actually spent time reading (>2s).
       // Sub-2s visits are accidental clicks or quick bounces — not meaningful signal.
       if (dwellSeconds > 2) {
-        sendBehaviorEvent({
-          article_id: article.id,
-          type: 'dwell',
-          value: dwellSeconds,
-        })
-        sendBehaviorEvent({
-          article_id: article.id,
-          type: 'scroll_depth',
-          value: maxScrollDepthRef.current,
-        })
+        sendBehaviorEvent({ article_id: article.id, type: 'dwell', value: dwellSeconds }, token)
+        sendBehaviorEvent({ article_id: article.id, type: 'scroll_depth', value: maxScrollDepthRef.current }, token)
       }
     }
   }, [article?.id]) // re-run if the user opens a different article
+  // token is intentionally excluded from the dependency array — it's captured
+  // by the cleanup closure at mount time and is stable within a session.
+  // Adding it would cause the effect to re-run on every token refresh.
 }

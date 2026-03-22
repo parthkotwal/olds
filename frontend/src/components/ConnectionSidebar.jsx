@@ -120,24 +120,33 @@ export default function ConnectionSidebar({ articleId, onArticleClick, className
       </div>
 
       {/* ── Loading state ───────────────────────────────────────────────── */}
+      {/* A pulsing rule signals "working quietly" without any text.
+          The animation is defined in index.css as @keyframes pulse. */}
       {loading && (
-        <div style={{ opacity: 0.4 }}>
-          {/* Three skeleton lines suggest content is coming */}
-          {[80, 65, 72].map((w, i) => (
+        <div>
+          {/* Three lines of varying width mimic the shape of incoming headlines */}
+          {[78, 62, 70].map((w, i) => (
             <div
               key={i}
               style={{
-                height: '0.65rem',
+                height: '0.6rem',
                 width: `${w}%`,
-                background: 'var(--color-muted)',
+                background: 'var(--color-rule)',
                 marginBottom: '0.5rem',
-                opacity: 0.3,
+                animation: `pulse 1.6s ease-in-out ${i * 160}ms infinite`,
               }}
             />
           ))}
-          <p className="text-muted" style={{ fontSize: '0.65rem', marginTop: '0.75rem' }}>
-            Traversing graph…
-          </p>
+          {/* A fourth shorter line after a gap — feels like a byline */}
+          <div
+            style={{
+              height: '0.45rem',
+              width: '45%',
+              background: 'var(--color-rule)',
+              marginTop: '0.75rem',
+              animation: 'pulse 1.6s ease-in-out 480ms infinite',
+            }}
+          />
         </div>
       )}
 
@@ -149,10 +158,19 @@ export default function ConnectionSidebar({ articleId, onArticleClick, className
       )}
 
       {/* ── Empty state ─────────────────────────────────────────────────── */}
+      {/* An intentional editorial statement rather than a system message. */}
       {!loading && !error && connections.length === 0 && (
-        <p className="text-muted italic" style={{ fontSize: '0.65rem', lineHeight: 1.5 }}>
-          No connected stories found yet. Check back after more articles are ingested.
-        </p>
+        <div style={{ animation: 'fadeIn 300ms ease-out both' }}>
+          <p
+            className="font-display text-muted"
+            style={{ fontSize: '0.75rem', fontStyle: 'italic', lineHeight: 1.6, marginBottom: '0.5rem' }}
+          >
+            This story stands alone.
+          </p>
+          <p className="text-muted" style={{ fontSize: '0.6rem', lineHeight: 1.5 }}>
+            No cross-topic connections found yet.
+          </p>
+        </div>
       )}
 
       {/* ── Cross-topic connections (highlighted) ───────────────────────── */}
@@ -209,13 +227,6 @@ export default function ConnectionSidebar({ articleId, onArticleClick, className
         </div>
       )}
 
-      {/* Fade-in keyframe — inlined so it doesn't require a separate CSS file */}
-      <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to   { opacity: 1; }
-        }
-      `}</style>
     </div>
   )
 }

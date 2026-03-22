@@ -1,10 +1,40 @@
-# Environment variables — never commit API keys
+# ── Environment variables ─────────────────────────────────────────────────────
+# Never commit secrets or local config. See .env.example for the full list.
 .env
 *.env
+.env.local
+.env.*.local
 
-# Go build output
+# ── Node / Frontend ───────────────────────────────────────────────────────────
+node_modules/
+dist/
+.vite/
+
+# ── Go / Backend ──────────────────────────────────────────────────────────────
 backend/server
 backend/tmp/
+*.exe
 
-# macOS
+# ── Python / ML service ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# ── Playwright / Testing ──────────────────────────────────────────────────────
+playwright-report/
+test-results/
+.playwright/
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Editors ───────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo

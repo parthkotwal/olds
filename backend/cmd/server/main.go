@@ -17,6 +17,7 @@ import (
 	"github.com/olds/backend/internal/graph"
 	"github.com/olds/backend/internal/guardian"
 	"github.com/olds/backend/internal/handler"
+	"github.com/olds/backend/internal/middleware"
 	"github.com/olds/backend/internal/mlclient"
 	"github.com/olds/backend/internal/newsapi"
 	"github.com/olds/backend/internal/repository"
@@ -34,6 +35,11 @@ func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Fatal("DATABASE_URL environment variable is required")
+	}
+
+	jwtSecret := os.Getenv("SUPABASE_JWT_SECRET")
+	if jwtSecret == "" {
+		log.Fatal("SUPABASE_JWT_SECRET environment variable is required")
 	}
 
 	// ── 2. Run database migrations ────────────────────────────────────────────
@@ -146,7 +152,9 @@ func main() {
 	r.Use(func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type")
+		// Authorization is added here so the browser's CORS preflight allows
+		// the frontend to send the JWT in the Authorization: Bearer header.
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
@@ -154,12 +162,30 @@ func main() {
 		c.Next()
 	})
 
+	// ── Public routes — no auth required ──────────────────────────────────────
+	// The article graph and connections are shared across all users. Reading
+	// the feed does not require authentication — only writing behavior signals
+	// (which are keyed to a user identity) requires a verified JWT.
 	r.GET("/health", handler.Health)
 	r.GET("/articles", articleHandler.List)
 	r.GET("/articles/:id/connections", articleHandler.Connections)
 	r.GET("/ws/connections/:id", articleHandler.WSConnections)
 	r.POST("/ingest", articleHandler.Ingest)
-	r.POST("/behavior", articleHandler.RecordBehavior)
+
+	// ── Protected routes — valid Supabase JWT required ────────────────────────
+	// Using a route group lets us apply the auth middleware to a subset of routes
+	// without wrapping every handler individually. Any route registered under
+	// `authorized` will run the Auth middleware before reaching the handler.
+	//
+	// In Go/Gin, middleware is just a handler that calls c.Next() to pass control
+	// to the next handler in the chain, or c.Abort() to stop the chain early.
+	authorized := r.Group("/")
+	authorized.Use(middleware.Auth(jwtSecret))
+	{
+		// POST /behavior requires auth so user IDs are attached to every signal.
+		// This is the foundation for per-user feed personalization.
+		authorized.POST("/behavior", articleHandler.RecordBehavior)
+	}
 
 	// ── 10. Start background ingestion goroutine ──────────────────────────────
 	// `go func() { ... }()` launches an anonymous function as a goroutine —

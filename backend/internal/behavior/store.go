@@ -42,10 +42,15 @@ const (
 
 // Event is the payload sent by the frontend to POST /behavior.
 // It mirrors the JSON the browser sends, validated in the handler.
+//
+// UserID is NOT populated from the request body — it is set by the handler
+// after extracting the verified user ID from the JWT via the auth middleware.
+// The json:"-" tag ensures it is never accidentally read from or written to JSON.
 type Event struct {
 	ArticleID string    `json:"article_id"`
 	Type      EventType `json:"type"`
 	Value     float64   `json:"value"`
+	UserID    string    `json:"-"` // set from JWT claims, never from request body
 }
 
 // ArticleSignals holds the accumulated behavioral signals for a single article.

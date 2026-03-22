@@ -7,19 +7,26 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
  * and tab close. This is critical for dwell/scroll_depth events which are
  * fired in useEffect cleanup (i.e. when the user navigates away).
  *
- * keepalive is the web-standard alternative to navigator.sendBeacon for
- * JSON payloads — sendBeacon only supports plain text or FormData.
+ * The auth token is sent in the Authorization header so the backend can
+ * attach the verified user ID to the stored event. POST /behavior requires
+ * a valid Supabase JWT — anonymous events are rejected.
  *
  * Errors are swallowed intentionally: behavior tracking is best-effort.
  * A failed event should never surface as a UI error to the user.
  *
  * @param {{ article_id: string, type: 'dwell'|'scroll_depth'|'reopen', value: number }} event
+ * @param {string} token — Supabase access token from session.access_token
  */
-export async function sendBehaviorEvent(event) {
+export async function sendBehaviorEvent(event, token) {
   try {
     await fetch(`${API_BASE}/behavior`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // Authorization header carries the Supabase JWT.
+        // The Go auth middleware verifies this and extracts the user ID.
+        'Authorization': `Bearer ${token}`,
+      },
       body: JSON.stringify(event),
       keepalive: true, // survives component unmount and tab close
     })

@@ -16,6 +16,10 @@ services:
       # The backend reads DATABASE_URL — it doesn't know or care whether that points to
       # a local container or Supabase's hosted instance.
       - DATABASE_URL=${SUPABASE_DATABASE_URL}
+      # Supabase JWT secret for verifying tokens on the Go backend (Phase 12).
+      # Find this in Supabase dashboard → Settings → API → JWT Secret.
+      # Never expose this value to the frontend or commit it to git.
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
     depends_on:
       ml-service:
         # Wait until ml-service passes its healthcheck before starting the backend.
@@ -45,6 +49,10 @@ services:
       # The browser makes API calls to this URL — must be reachable from the user's
       # machine (localhost), not from inside Docker (http://backend:8080).
       - VITE_API_BASE_URL=http://localhost:8080
+      # Supabase public keys — safe to expose to the browser bundle.
+      # VITE_ prefix is required; Vite strips unprefixed vars from the client bundle.
+      - VITE_SUPABASE_URL=${SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
     depends_on:
       - backend
     restart: unless-stopped

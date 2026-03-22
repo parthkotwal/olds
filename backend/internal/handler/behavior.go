@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/olds/backend/internal/behavior"
+	"github.com/olds/backend/internal/middleware"
 )
 
 // RecordBehavior handles POST /behavior.
@@ -53,6 +54,14 @@ func (h *ArticleHandler) RecordBehavior(c *gin.Context) {
 	if event.ArticleID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "article_id is required"})
 		return
+	}
+
+	// Attach the verified user ID from the JWT so it is persisted with the event.
+	// c.Get returns the value set by the auth middleware and a boolean indicating
+	// whether the key exists. We use a type assertion (.(string)) to convert the
+	// stored interface{} back to the concrete string type.
+	if userID, exists := c.Get(middleware.UserIDKey); exists {
+		event.UserID = userID.(string)
 	}
 
 	h.behaviorStore.Record(event)

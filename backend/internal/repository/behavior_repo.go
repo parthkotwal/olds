@@ -35,11 +35,22 @@ func NewBehaviorRepository(pool *pgxpool.Pool) BehaviorRepository {
 // Events are immutable facts — we INSERT, never UPDATE. This means the
 // behavior_events table is append-only, which is the right model for an
 // audit-style signal log. LoadSignals aggregates them at startup.
+//
+// user_id is stored as a nullable TEXT column. We pass nil when the event
+// has no user ID (e.g. anonymous pre-auth sessions), which pgx correctly
+// inserts as SQL NULL. A *string pointer is the Go idiom for nullable strings:
+// nil → NULL, &value → the string value.
 func (r *pgxBehaviorRepo) RecordEvent(ctx context.Context, e behavior.Event) error {
+	// Convert empty UserID to nil so pgx inserts NULL for anonymous events.
+	var userID *string
+	if e.UserID != "" {
+		userID = &e.UserID
+	}
+
 	_, err := r.pool.Exec(ctx, `
-		INSERT INTO behavior_events (article_id, event_type, value)
-		VALUES ($1, $2, $3)
-	`, e.ArticleID, e.Type, e.Value)
+		INSERT INTO behavior_events (article_id, event_type, value, user_id)
+		VALUES ($1, $2, $3, $4)
+	`, e.ArticleID, e.Type, e.Value, userID)
 	if err != nil {
 		return fmt.Errorf("insert behavior event for article %s: %w", e.ArticleID, err)
 	}

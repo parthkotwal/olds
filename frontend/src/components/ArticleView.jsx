@@ -25,12 +25,14 @@ function formatDate(dateStr) {
 //
 // Props:
 //   article  Article  — the article to display
+//   token    string   — Supabase JWT, forwarded to behavior tracking
 //   onBack   fn       — called when "Back to feed" is clicked
-export default function ArticleView({ article, onBack, onArticleClick }) {
+export default function ArticleView({ article, token, onBack, onArticleClick }) {
   // Track reading signals — dwell time, scroll depth, re-opens.
   // This hook fires immediately on mount (reopen signal) and sends
   // dwell + scroll_depth to the backend when the component unmounts.
-  useBehaviorTracking(article)
+  // The token is passed through so the backend can key signals to the user.
+  useBehaviorTracking(article, token)
 
   return (
     <div>
