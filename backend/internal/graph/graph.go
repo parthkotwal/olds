@@ -187,6 +187,91 @@ func (g *Graph) EdgeCount() int {
 	return totalEdges(g.edges)
 }
 
+// GraphStats is a snapshot of the graph's topology at a point in time.
+// Returned by Stats() and exposed via GET /stats for stress-test observability.
+type GraphStats struct {
+	NodeCount       int     `json:"node_count"`
+	DirectedEdges   int     `json:"directed_edges"`  // each undirected edge stored twice
+	UniqueEdges     int     `json:"unique_edges"`     // undirected edge count = directed/2
+	AvgEdgesPerNode float64 `json:"avg_edges_per_node"`
+	IsolatedNodes   int     `json:"isolated_nodes"`  // nodes with zero edges (no connections found)
+	MaxEdgesPerNode int     `json:"max_edges_per_node"`
+	DensityPct      float64 `json:"density_pct"`          // unique_edges / max_possible_edges × 100
+	CrossTopicRatioPct float64 `json:"cross_topic_ratio_pct"` // % of edges that bridge different categories
+}
+
+// Stats returns a topology snapshot of the graph.
+// Uses a read lock — safe to call concurrently with Neighbors() and Add().
+//
+// DensityPct tells us how "full" the graph is. At 100 articles with average
+// density ~5%, we expect most articles to have a handful of connections. If
+// density grows much faster than linearly with node count, the edge weight
+// threshold (0.1) may be too permissive — a key stress-test signal.
+func (g *Graph) Stats() GraphStats {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	nodeCount := len(g.nodes)
+	directedEdges := totalEdges(g.edges)
+	uniqueEdges := directedEdges / 2
+
+	var maxEdges, isolatedNodes, crossTopicDirected int
+	// Single pass over nodes: compute topology stats AND cross-topic ratio.
+	// Iterating over g.nodes (not g.edges) ensures isolated nodes are counted —
+	// they have no entry in g.edges so a range over edges would miss them.
+	for id := range g.nodes {
+		edgeList := g.edges[id] // nil slice if no entry — len(nil) == 0 in Go
+		count := len(edgeList)
+		if count == 0 {
+			isolatedNodes++
+		}
+		if count > maxEdges {
+			maxEdges = count
+		}
+		// Count directed cross-topic edges originating from this node.
+		// Since edges are stored bidirectionally, each undirected cross-topic
+		// pair contributes 2 to crossTopicDirected — we divide by 2 below.
+		sourceCategory := g.nodes[id].Category
+		for _, e := range edgeList {
+			if g.nodes[e.ArticleID].Category != sourceCategory {
+				crossTopicDirected++
+			}
+		}
+	}
+
+	var avgEdges float64
+	if nodeCount > 0 {
+		avgEdges = float64(directedEdges) / float64(nodeCount)
+	}
+
+	// Max possible unique edges in an undirected graph = N*(N-1)/2.
+	var densityPct float64
+	maxPossible := nodeCount * (nodeCount - 1) / 2
+	if maxPossible > 0 {
+		densityPct = float64(uniqueEdges) / float64(maxPossible) * 100
+	}
+
+	// crossTopicDirected double-counts each undirected pair (A→B and B→A),
+	// so unique cross-topic edges = crossTopicDirected / 2.
+	// Express as a percentage of all unique edges — this is the product metric:
+	// if 40% of connections bridge different categories, the engine is working.
+	var crossTopicRatioPct float64
+	if uniqueEdges > 0 {
+		crossTopicRatioPct = float64(crossTopicDirected/2) / float64(uniqueEdges) * 100
+	}
+
+	return GraphStats{
+		NodeCount:          nodeCount,
+		DirectedEdges:      directedEdges,
+		UniqueEdges:        uniqueEdges,
+		AvgEdgesPerNode:    avgEdges,
+		IsolatedNodes:      isolatedNodes,
+		MaxEdgesPerNode:    maxEdges,
+		DensityPct:         densityPct,
+		CrossTopicRatioPct: crossTopicRatioPct,
+	}
+}
+
 // totalEdges sums all edge-list lengths. Called within methods that already
 // hold a lock — NOT a public method, does no locking of its own.
 func totalEdges(edges map[string][]Edge) int {

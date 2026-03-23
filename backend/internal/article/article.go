@@ -161,3 +161,51 @@ func (s *Store) Count() int {
 	defer s.mu.RUnlock()
 	return len(s.articles)
 }
+
+// CountByCategory returns a map of category → article count.
+// Used by the /stats endpoint to observe feed composition during stress testing.
+func (s *Store) CountByCategory() map[string]int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	counts := make(map[string]int)
+	for _, a := range s.articles {
+		counts[a.Category]++
+	}
+	return counts
+}
+
+// DecaySnapshot holds article counts per decay tier at a point in time.
+// These tiers mirror the frontend's visual decay logic (ArticleCard.jsx)
+// so the backend stats reflect what the reader actually sees.
+type DecaySnapshot struct {
+	Fresh  int `json:"fresh"`  // published < 6h ago — full opacity
+	Recent int `json:"recent"` // 6–24h ago
+	Aging  int `json:"aging"`  // 24–48h ago — slightly muted
+	Stale  int `json:"stale"`  // > 48h ago — visibly faded
+}
+
+// DecaySnapshot returns a count of articles in each decay tier right now.
+// Useful for stress testing: if Stale grows faster than Fresh, the ingestion
+// schedule is too slow or the decay window is too aggressive.
+func (s *Store) DecaySnapshot() DecaySnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var snap DecaySnapshot
+	now := time.Now()
+	for _, a := range s.articles {
+		ageHours := now.Sub(a.PublishedAt).Hours()
+		switch {
+		case ageHours < 6:
+			snap.Fresh++
+		case ageHours < 24:
+			snap.Recent++
+		case ageHours < 48:
+			snap.Aging++
+		default:
+			snap.Stale++
+		}
+	}
+	return snap
+}

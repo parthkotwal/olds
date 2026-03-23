@@ -17,6 +17,7 @@ package handler
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -82,9 +83,21 @@ func (h *ArticleHandler) WSConnections(c *gin.Context) {
 
 	// ── Graph traversal ───────────────────────────────────────────────────────
 	// Traverse the graph to find the top 10 neighbours with weight ≥ 0.1.
-	// This call holds the graph's RLock for the duration of the sort —
-	// typically <1ms even for hundreds of articles.
+	// Time the traversal so we can detect when the graph grows large enough
+	// to cause latency problems — a key stress-test observable (Phase 14).
+	traversalStart := time.Now()
 	edges := h.graph.Neighbors(id, 10, 0.1)
+	traversalElapsed := time.Since(traversalStart)
+
+	// 50ms is a generous threshold — in-memory traversal should be <1ms at
+	// typical scales (~500 nodes). Logging here flags when we need to optimise.
+	if traversalElapsed > 50*time.Millisecond {
+		log.Printf("ws: SLOW traversal for article %s: %v (%d nodes in graph)",
+			id, traversalElapsed, h.graph.NodeCount())
+	} else {
+		log.Printf("ws: traversal for article %s: %v (%d nodes)",
+			id, traversalElapsed, h.graph.NodeCount())
+	}
 
 	// Hydrate each edge into a full Connection (article data + weight + flag).
 	// Reuses the Connection type defined in connections.go — same payload shape

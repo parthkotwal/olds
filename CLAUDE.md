@@ -34,10 +34,12 @@ Three services in a monorepo:
 
 ```
 olds/
-├── backend/          # Go (Gin) — feed, behavior tracking, graph, WebSockets
+├── backend/          # Go (Gin) — feed, behavior tracking, graph, WebSockets, auth middleware
 ├── ml-service/       # Python (FastAPI) — entity extraction, embeddings
-├── frontend/         # React + Tailwind — feed UI, real-time connection sidebar
-├── docker-compose.yml
+├── frontend/         # React + Tailwind — feed UI, real-time connection sidebar, Supabase auth (email + Google OAuth)
+│   └── DESIGN_BRIEF.md  # Editorial newspaper design language spec
+├── docker-compose.yml    # Backend, ML service, frontend, Postgres + pgvector (local dev)
+├── .env.example          # Supabase keys, NewsAPI/Guardian keys, DB connection string
 ├── CLAUDE.md
 └── README.md
 ```
@@ -71,12 +73,14 @@ olds/
 | Backend         | Go (Gin)                           | First Go project — prioritize idiomatic, readable code       |
 | ML Microservice | Python (FastAPI)                   | Entity extraction + embeddings; ML stays in Python           |
 | Frontend        | React + Tailwind                   | Standard stack; use functional components + hooks             |
-| Graph           | In-memory Go structure (Neo4j stretch goal) | Core of the project                               |
+| Graph           | In-memory Go structure (hydrated from Postgres) | Core of the project; Neo4j is a stretch goal      |
+| Database        | PostgreSQL + pgvector              | Local: Docker container. Production: Supabase hosted Postgres |
+| Auth            | Supabase Auth (Email + Google OAuth) + JWT | Frontend handles email/password and Google OAuth flows, Go backend verifies JWTs |
 | Real-time       | WebSockets (Go)                    | Connection graph updates live as user reads                   |
 | News Ingestion  | NewsAPI / The Guardian API         | Solved problem — use APIs, do not scrape                     |
-| Deployment      | Docker + docker-compose            | All three services containerized                              |
+| Deployment      | Railway (services) + Supabase (DB + auth) | Docker containers on Railway; Supabase free tier for data |
 
-## Build Order (Follow This Sequence)
+## Phase 1 Build Order (Complete)
 
 Build vertically, not horizontally. Get a thin slice working end-to-end before expanding.
 
@@ -91,16 +95,100 @@ Build vertically, not horizontally. Get a thin slice working end-to-end before e
 9. **Implicit behavior tracking** — Track dwell time, scroll depth, re-opens. Use these signals to re-weight the feed
 10. **Feed decay** — Stories with no new developments lose prominence over time
 
+## Current State (Phases 1–11 Complete)
+
+All ten initial phases plus Postgres persistence are built and working end-to-end in Docker:
+
+- **Go backend** is running with Gin, serving the articles feed, handling ingestion, and managing WebSocket connections.
+- **Python ML service** extracts entities (spaCy) and generates embeddings (sentence-transformers, `all-MiniLM-L6-v2`) via FastAPI.
+- **Ingestion pipeline** fetches articles from NewsAPI/Guardian API, sends them through the ML service, and stores them with entities + vectors.
+- **In-memory article graph** in Go computes edge weights from cosine similarity + entity overlap. Graph traversal returns cross-topic connections above a similarity threshold. The graph hydrates from Postgres on startup.
+- **PostgreSQL + pgvector** persists articles, entities, embeddings, and behavior signals. Data survives restarts.
+- **React frontend** displays the feed with the editorial newspaper design language (serif headlines, warm off-white, columnar layout, thin rules). Connection sidebar shows related stories when reading an article.
+- **WebSocket layer** pushes cross-topic connections to the frontend in real time when a user opens an article.
+- **Implicit behavior tracking** captures dwell time, scroll depth, and re-opens from the frontend. These signals influence feed ranking.
+- **Feed decay** reduces prominence of stories over time when no new developments occur.
+- All services are containerized and run via `docker-compose up`.
+
+## Phase 2 Build Order
+
+Continue from where Phase 1 left off. Same principle: each phase should be working and testable before moving to the next.
+
+12. **Authentication via Supabase** — Add Supabase Auth for email/password and Google OAuth login. The frontend handles both auth flows using `@supabase/supabase-js` (`supabase.auth.signInWithPassword()` for email, `supabase.auth.signInWithOAuth()` for Google). The Go backend verifies Supabase-issued JWTs via a middleware that checks the `Authorization: Bearer <token>` header and decodes it using the Supabase JWT secret. User records are managed by Supabase Auth. The article graph and connections remain shared across all users, but feed ranking and behavior signals are keyed per user ID extracted from the JWT. No roles, no admin — just identity. See "Local vs Production Environment" section for how Supabase keys are configured.
+
+13. **Frontend polish for portfolio presentation** — This is about the small details that separate "project" from "product." Add: a subtle loading state when connections are being found (quiet pulsing line in the sidebar), intentional empty states ("No cross-topic connections found — this story stands alone"), smooth first-load experience where the feed populates gracefully rather than popping in all at once, and any micro-interactions that reinforce the editorial design language. Then invoke the **webapp-testing** skill to write Playwright tests covering the key user flows: feed loads, article click-through, connection sidebar appears, WebSocket reconnection after disconnect.
+
+14. **Stress-test with real usage** — Set up a scheduled goroutine (or cron job) that ingests articles every 30 minutes. Let it run for several days and actually use the app as a reader. Observe what breaks: graph traversal slowing down at scale, decay being too aggressive o r too gentle, entity types (especially locations) creating noisy low-quality connections. Document findings. This phase produces the backlog for the graph improvement phases — do not skip it.
+
+15. **Connection provenance labels** — When the sidebar shows a connection, explain *why*: "Connected via: South China Sea, Xi Jinping" or "Semantic similarity: trade policy." Surface the entity overlap and similarity scores that already exist in the graph. Critical for demo-ability — without this, the product is a black box.
+
+16. **Graph quality improvements** — Informed by the stress-test findings. At minimum: temporal edge weighting (articles published closer together get stronger connections), and category diversity scoring (explicitly boost cross-topic connections, penalize same-category ones). Additional fixes as identified during the stress-test phase.
+
+17. **Reading trail visualization** — A page or overlay showing the user's reading path as a visual graph: nodes are articles they've read, edges show connections they followed across topics. This is the demo centerpiece — someone looks at it and immediately understands what Olds does. Keep the visual style consistent with the newspaper aesthetic (no neon force-directed graphs). Consider a clean timeline-with-branches or a styled small-multiples layout.
+
+18. **Article clustering on the feed page** — Instead of a flat ranked list, group connected stories visually: a lead story with 2–3 related stories tucked underneath, like how a newspaper groups related coverage. This makes the connection engine visible on the feed page itself, not just in the article sidebar.
+
+19. **Deploy to Railway + Supabase** — See "Deployment" section below. Deploy all three services to Railway as Docker containers. Point the database connection at Supabase's hosted Postgres. Configure environment variables in Railway's dashboard. Verify everything works end-to-end at the production URL.
+
 ## Scope Guardrails — Read This Before Every Task
 
 - **DO NOT** build a scraper. Use NewsAPI or Guardian API for ingestion.
 - **DO NOT** train any ML models. Use a pretrained sentence-transformers model.
-- **DO NOT** build a user authentication system. Assume a single user for now.
-- **DO NOT** use a database unless explicitly told to. Start with in-memory data structures in Go.
-- **DO NOT** prematurely optimize. Get it working, then make it fast.
+- **DO NOT** build roles or an admin panel. Supabase Auth handles email/password and Google OAuth; Go backend only verifies JWTs.
+- **DO NOT** replace the in-memory Go graph with a database query layer. Postgres is for persistence; the Go graph is for real-time traversal. Hydrate the graph from Postgres on startup.
+- **DO NOT** add Neo4j unless all Phase 2 items are complete and working.
+- **DO NOT** prematurely optimize. Get it working, then make it fast — but do stress-test (Phase 14) before adding features.
 - **DO** keep the three services cleanly separated. They communicate over HTTP and WebSocket only.
-- **DO** write tests. At minimum, test the graph traversal logic and the ML service entity extraction.
-- **DO** use Docker for all services from day one. If it doesn't run in Docker, it doesn't count.
+- **DO** write tests. At minimum, test the graph traversal logic, ML service entity extraction, and key frontend flows (Playwright).
+- **DO** use Docker for all services. If it doesn't run in Docker, it doesn't count.
+- **DO** follow the build order. Each phase should be working and testable before starting the next.
+- **DO** use environment variables for all secrets and connection strings. Never hardcode Supabase keys, API keys, or DB credentials.
+
+## Local vs Production Environment
+
+The project uses different infrastructure locally vs in production, but the application code is the same. All differences are handled via environment variables.
+
+| Concern    | Local (docker-compose)                     | Production                                |
+|------------|--------------------------------------------|-------------------------------------------|
+| Database   | Postgres + pgvector in a Docker container  | Supabase hosted Postgres (pgvector enabled) |
+| Auth       | Supabase Auth (same project, dev mode)     | Supabase Auth (same project, prod mode)   |
+| Backend    | Docker container on localhost              | Railway (Docker deploy)                    |
+| ML Service | Docker container on localhost              | Railway (Docker deploy)                    |
+| Frontend   | Docker container or `npm run dev`          | Railway (static build or Docker deploy)    |
+| Secrets    | `.env` file (gitignored)                   | Railway environment variables              |
+
+**Required environment variables** (list in `.env.example`, never commit actual values):
+- `DATABASE_URL` — Postgres connection string (local Docker or Supabase)
+- `SUPABASE_URL` — Supabase project URL (e.g., `https://xxxxx.supabase.co`)
+- `SUPABASE_ANON_KEY` — Public anon key (safe for frontend)
+- `SUPABASE_JWT_SECRET` — For JWT verification on the Go backend (never expose to frontend)
+- `NEWSAPI_KEY` — NewsAPI access key
+- `GUARDIAN_API_KEY` — The Guardian Open Platform key
+
+The Go backend reads `DATABASE_URL` to connect to Postgres — it doesn't know or care whether that's a local Docker container or Supabase's hosted instance. Same for `SUPABASE_JWT_SECRET` — the JWT verification middleware works identically in both environments.
+
+## Deployment (Railway + Supabase)
+
+**Supabase** (set up first, handles data + auth):
+- Free tier: 500MB Postgres with pgvector, unlimited auth users
+- OAuth providers (Google) configured in Supabase dashboard; email/password auth enabled
+- Connection string and keys used by both local dev and production
+
+**Railway** (handles compute):
+- Each service (backend, ml-service, frontend) deploys as a separate Railway service from its Dockerfile
+- Railway auto-detects Dockerfiles and builds on push
+- Environment variables set in Railway dashboard per service
+- Internal networking: backend and ml-service communicate via Railway's private network
+- Custom domain or Railway-provided URL for the frontend
+
+**Deployment steps** (Phase 19):
+1. Create a Railway project with three services, each pointed at the relevant subdirectory
+2. Set environment variables in Railway (DATABASE_URL pointing to Supabase, plus all Supabase keys and API keys)
+3. Deploy and verify each service starts and connects
+4. Test the full flow end-to-end at the production URL
+5. Set up the scheduled ingestion goroutine to run against production
+
+Do not deploy until all prior phases are working locally. Railway is the last phase, not an ongoing concern during development.
 
 ## Code Conventions
 
@@ -138,7 +226,10 @@ This matters because it shapes what we emphasize in the code:
 - Polyglot microservice architecture (Go + Python)
 - Graph algorithms (real-time traversal, edge weighting by entity overlap + semantic similarity)
 - NLP pipeline (entity extraction, sentence-transformer embeddings)
+- Vector similarity search (pgvector)
+- Authentication (Supabase Auth with email/password + Google OAuth, JWT verification)
 - Real-time serving (WebSockets)
 - Full-stack (React frontend through to ML inference layer)
 - Implicit feedback system (behavior-driven personalization, no explicit ratings)
-- Docker-based service orchestration
+- Docker-based service orchestration with Postgres persistence
+- Cloud deployment (Railway + Supabase)

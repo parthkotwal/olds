@@ -9,6 +9,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/olds/backend/internal/article"
@@ -107,6 +108,7 @@ func main() {
 	// the repository package).
 	articleRepo := repository.NewArticleRepository(pool)
 	behaviorRepo := repository.NewBehaviorRepository(pool)
+	snapshotRepo := repository.NewSnapshotRepository(pool)
 
 	// ── 7. Hydrate in-memory stores from Postgres ─────────────────────────────
 	// HydrateFromDB runs synchronously before the HTTP server starts so that
@@ -128,7 +130,7 @@ func main() {
 	// ── 8. Construct the handler and register routes ──────────────────────────
 	articleHandler := handler.NewArticleHandler(
 		store, client, guardianClient, mlClient, g, bs,
-		articleRepo, behaviorRepo,
+		articleRepo, behaviorRepo, snapshotRepo,
 	)
 
 	// ── 9. Register routes ────────────────────────────────────────────────────
@@ -171,6 +173,10 @@ func main() {
 	r.GET("/articles/:id/connections", articleHandler.Connections)
 	r.GET("/ws/connections/:id", articleHandler.WSConnections)
 	r.POST("/ingest", articleHandler.Ingest)
+	// /stats exposes graph topology, decay distribution, and ingestion telemetry
+	// for Phase 14 stress-test observability. No auth — no user data exposed.
+	r.GET("/stats", articleHandler.Stats)
+	r.GET("/stats/history", articleHandler.StatsHistory)
 
 	// ── Protected routes — valid Supabase JWT required ────────────────────────
 	// Using a route group lets us apply the auth middleware to a subset of routes
@@ -187,25 +193,53 @@ func main() {
 		authorized.POST("/behavior", articleHandler.RecordBehavior)
 	}
 
-	// ── 10. Start background ingestion goroutine ──────────────────────────────
-	// `go func() { ... }()` launches an anonymous function as a goroutine —
-	// a lightweight concurrent execution unit managed by the Go runtime.
+	// ── 10. Start scheduled ingestion goroutine ───────────────────────────────
+	// Runs immediately on startup, then repeats every INGEST_INTERVAL (default
+	// 30 minutes). The interval is configurable so stress-testing can use a
+	// shorter cycle (e.g. INGEST_INTERVAL=5m) without changing code.
 	//
-	// Why launch this after hydration? Hydration loads the persisted state;
-	// ingestion fetches fresh articles. By running ingestion after hydration,
-	// we avoid a race where fresh articles overwrite the hydrated state.
+	// Why a goroutine? r.Run() below blocks forever — it IS the server loop.
+	// We must launch ingestion as a goroutine so the server starts accepting
+	// requests (serving the hydrated feed) while the first fetch runs in parallel.
 	//
-	// Why still use a goroutine (not call directly)? r.Run() blocks forever —
-	// it IS the server. Calling ingestion directly before r.Run() would mean
-	// the server isn't listening while fetching/enriching all articles (~30s).
-	// A goroutine means the server starts immediately and serves the hydrated
-	// feed while new articles are fetched in parallel.
+	// time.Ticker is Go's standard periodic timer. ticker.C is a channel that
+	// receives a value every interval — `for range ticker.C` loops on each tick,
+	// equivalent to `setInterval` in JS. defer ticker.Stop() cancels the ticker
+	// when the goroutine exits (never in normal operation, but good practice).
 	go func() {
 		log.Println("starting initial article ingestion...")
-		if err := articleHandler.RunStartupIngest(); err != nil {
+		if err := articleHandler.RunScheduledIngest(); err != nil {
+			// Non-fatal: the server stays up with the hydrated store.
+			// The next ticker tick will retry automatically.
 			log.Printf("initial ingestion failed: %v", err)
-			// Log and return — the server stays up with the hydrated store.
-			// Hit POST /ingest to retry once the issue is resolved.
+		}
+
+		// Parse ingestion interval from env — defaults to 30 minutes.
+		// time.ParseDuration understands "30m", "1h", "5m30s", etc.
+		interval := 30 * time.Minute
+		if v := os.Getenv("INGEST_INTERVAL"); v != "" {
+			if d, err := time.ParseDuration(v); err == nil && d > 0 {
+				interval = d
+				log.Printf("ingest interval overridden to %v via INGEST_INTERVAL", interval)
+			} else {
+				log.Printf("invalid INGEST_INTERVAL %q — using default 30m", v)
+			}
+		}
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		log.Printf("scheduled ingestion running every %v", interval)
+
+		// range over a channel blocks until the next value arrives, then runs
+		// the loop body. This is the idiomatic Go pattern for periodic tasks —
+		// no sleep loops, no manual timing, no goroutine leaks.
+		for range ticker.C {
+			log.Printf("scheduled ingestion triggered (interval: %v)", interval)
+			if err := articleHandler.RunScheduledIngest(); err != nil {
+				log.Printf("scheduled ingestion failed: %v", err)
+				// Continue — next tick will retry. Don't exit the goroutine.
+			}
 		}
 	}()
 

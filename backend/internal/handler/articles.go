@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/olds/backend/internal/article"
@@ -43,6 +45,16 @@ type ArticleHandler struct {
 	// They are never nil — always constructed in main.go.
 	articleRepo  repository.ArticleRepository
 	behaviorRepo repository.BehaviorRepository
+	// snapshotRepo persists a system metrics row after every ingestion run.
+	// Never nil — constructed in main.go for Phase 14 stress-test observability.
+	snapshotRepo repository.SnapshotRepository
+
+	// Ingestion telemetry — guarded by ingestMu so the /stats handler can
+	// safely read these from a different goroutine than the ingestion goroutine.
+	ingestMu        sync.Mutex
+	ingestRunCount  int       // total number of scheduled ingestion runs completed
+	lastIngestAt    time.Time // wall-clock time of the most recent completed run
+	lastIngestCount int       // articles ingested in the most recent run
 }
 
 // NewArticleHandler constructs a handler with its dependencies injected.
@@ -59,6 +71,7 @@ func NewArticleHandler(
 	bs *behavior.Store,
 	articleRepo repository.ArticleRepository,
 	behaviorRepo repository.BehaviorRepository,
+	snapshotRepo repository.SnapshotRepository,
 ) *ArticleHandler {
 	return &ArticleHandler{
 		store:          store,
@@ -69,6 +82,7 @@ func NewArticleHandler(
 		behaviorStore:  bs,
 		articleRepo:    articleRepo,
 		behaviorRepo:   behaviorRepo,
+		snapshotRepo:   snapshotRepo,
 	}
 }
 

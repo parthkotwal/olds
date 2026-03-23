@@ -6,9 +6,11 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/olds/backend/internal/article"
+	"github.com/olds/backend/internal/repository"
 )
 
 // Ingest handles POST /ingest.
@@ -64,28 +66,26 @@ func (h *ArticleHandler) Ingest(c *gin.Context) {
 	})
 }
 
-// RunStartupIngest performs the same fetch → enrich → store pipeline as the
-// HTTP Ingest handler, but without a Gin context. Called from main.go's
-// startup goroutine so the background ingestion also benefits from ML enrichment.
+// RunScheduledIngest performs the full fetch → enrich → store pipeline without
+// a Gin context. Used for both the initial startup run and subsequent ticker
+// runs (every 30 minutes by default). Separating this from the HTTP Ingest
+// handler keeps the business logic reusable without a request context.
 //
-// Separating this from Ingest avoids duplicating logic: both paths call the
-// same enrich() helper. This mirrors the separation of concerns you'd use in
-// Python: a service function (RunStartupIngest) vs a view function (Ingest)
-// that both delegate to the same business logic.
-func (h *ArticleHandler) RunStartupIngest() error {
+// After each run it updates the ArticleHandler's ingestion telemetry fields
+// so the /stats endpoint can report on ingestion health.
+func (h *ArticleHandler) RunScheduledIngest() error {
 	articles, err := h.client.FetchAll()
 	if err != nil {
-		return fmt.Errorf("startup ingest: fetch failed: %w", err)
+		return fmt.Errorf("scheduled ingest: NewsAPI fetch failed: %w", err)
 	}
 
 	if h.guardianClient != nil {
 		guardianArticles, err := h.guardianClient.FetchAll()
 		if err != nil {
-			// Non-fatal: log and continue with NewsAPI articles only.
-			log.Printf("startup ingest: guardian fetch failed: %v", err)
+			log.Printf("scheduled ingest: guardian fetch failed (continuing): %v", err)
 		} else {
 			articles = append(articles, guardianArticles...)
-			log.Printf("startup ingest: fetched %d guardian articles", len(guardianArticles))
+			log.Printf("scheduled ingest: fetched %d guardian articles", len(guardianArticles))
 		}
 	}
 
@@ -93,17 +93,83 @@ func (h *ArticleHandler) RunStartupIngest() error {
 	h.store.Add(enriched)
 	h.graph.Add(enriched)
 
-	// Persist to Postgres. context.Background() is used here because
-	// RunStartupIngest has no HTTP request context — it runs in a goroutine
-	// launched from main(). context.Background() is the idiomatic Go root
-	// context for work not associated with a specific request.
+	// context.Background() is the idiomatic root context for work not tied
+	// to an HTTP request — this goroutine has no request lifecycle to cancel it.
 	if err := h.articleRepo.UpsertBatch(context.Background(), enriched); err != nil {
-		log.Printf("startup ingest: DB persist failed: %v", err)
+		log.Printf("scheduled ingest: DB persist failed: %v", err)
 	}
 
-	log.Printf("startup ingest: %d articles stored, graph: %d nodes / %d edges",
-		len(enriched), h.graph.NodeCount(), h.graph.EdgeCount())
+	// Log entity quality metrics — the primary stress-test signal for whether
+	// the ML pipeline is producing useful signal. Key things to watch:
+	//   - noEntityCount high → ML service struggling, graph edges will be
+	//     purely cosine-based (lower precision for cross-topic discovery)
+	//   - GPE/LOC count high → location entities may create noisy connections
+	//     between unrelated stories set in the same country (Phase 14 finding)
+	logEntityQuality(enriched)
+
+	graphStats := h.graph.Stats()
+	log.Printf("scheduled ingest complete: %d articles stored | graph: %d nodes / %d unique edges (%.1f%% density)",
+		len(enriched), graphStats.NodeCount, graphStats.UniqueEdges, graphStats.DensityPct)
+
+	// Update telemetry under lock — the /stats handler reads these from the
+	// main goroutine concurrently with ingestion goroutine writes.
+	h.ingestMu.Lock()
+	h.ingestRunCount++
+	h.lastIngestAt = time.Now()
+	h.lastIngestCount = len(enriched)
+	runCount := h.ingestRunCount
+	h.ingestMu.Unlock()
+
+	// Persist a snapshot row so the stress-test history is queryable later.
+	// Non-fatal: if the DB write fails, the in-memory state is still correct.
+	decay := h.store.DecaySnapshot()
+	snap := repository.Snapshot{
+		NodeCount:          graphStats.NodeCount,
+		UniqueEdges:        graphStats.UniqueEdges,
+		DensityPct:         graphStats.DensityPct,
+		AvgEdgesPerNode:    graphStats.AvgEdgesPerNode,
+		IsolatedNodes:      graphStats.IsolatedNodes,
+		MaxEdgesPerNode:    graphStats.MaxEdgesPerNode,
+		CrossTopicRatioPct: graphStats.CrossTopicRatioPct,
+		ArticlesFresh:      decay.Fresh,
+		ArticlesRecent:     decay.Recent,
+		ArticlesAging:      decay.Aging,
+		ArticlesStale:      decay.Stale,
+		IngestRunCount:     runCount,
+		LastIngestArticles: len(enriched),
+	}
+	if err := h.snapshotRepo.Save(context.Background(), snap); err != nil {
+		log.Printf("scheduled ingest: snapshot save failed: %v", err)
+	}
+
 	return nil
+}
+
+// logEntityQuality prints a breakdown of entity types and coverage after each
+// ingestion run. Helps identify whether GPE/LOC entities are dominating and
+// creating low-quality geographic connections (a known stress-test risk).
+func logEntityQuality(articles []article.Article) {
+	var totalEntities, noEntityCount int
+	typeCounts := make(map[string]int)
+
+	for _, a := range articles {
+		if len(a.Entities) == 0 {
+			noEntityCount++
+			continue
+		}
+		for _, e := range a.Entities {
+			typeCounts[e.Label]++
+			totalEntities++
+		}
+	}
+
+	log.Printf("ingest entity quality: %d entities across %d articles (%d with none)",
+		totalEntities, len(articles), noEntityCount)
+	// Log each entity type count so we can spot GPE/LOC dominance.
+	for label, count := range typeCounts {
+		pct := float64(count) / float64(totalEntities) * 100
+		log.Printf("  %s: %d (%.0f%%)", label, count, pct)
+	}
 }
 
 // enrich calls the ML service for each article concurrently and returns a
