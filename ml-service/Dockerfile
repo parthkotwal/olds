@@ -73,4 +73,7 @@ EXPOSE 8001
 # would exhaust memory on a development machine. A single worker handles
 # article analysis fine: NER + embedding takes 50-200ms, and ingestion
 # is not a concurrent hot path.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+#
+# Shell form (not JSON array) is required here so the shell expands $PORT.
+# Railway injects PORT at runtime; we fall back to 8001 for local docker-compose.
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001}

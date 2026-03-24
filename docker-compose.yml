@@ -35,6 +35,10 @@ services:
       context: ./ml-service
     ports:
       - "8001:8001"
+    environment:
+      # PIN PORT so the $PORT shell expansion in CMD lands on the same port
+      # docker-compose maps externally. Railway overrides this automatically.
+      - PORT=8001
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
@@ -54,9 +58,13 @@ services:
         - VITE_SUPABASE_URL=${SUPABASE_URL}
         - VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
     ports:
-      # nginx listens on 80 inside the container; we expose it on 5173 locally
-      # so existing bookmarks/dev habits (localhost:5173) still work.
+      # nginx listens on $PORT (set to 80 below); map to 5173 externally so
+      # existing dev bookmarks (localhost:5173) still work.
       - "5173:80"
+    environment:
+      # PORT tells nginx.conf.template which port to listen on locally.
+      # Railway overrides this with its own dynamically assigned port.
+      - PORT=80
     depends_on:
       - backend
     restart: unless-stopped

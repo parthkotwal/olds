@@ -1,0 +1,16 @@
+server {
+  listen ${PORT};
+  root /usr/share/nginx/html;
+  index index.html;
+
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+
+  # Cache hashed static assets aggressively; index.html must not be cached
+  # so users always get the latest JS bundle after a redeploy.
+  location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+  }
+}

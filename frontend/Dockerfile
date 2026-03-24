@@ -6,54 +6,44 @@
 #
 # Stage 2 (runtime): serves the static files with nginx. The Alpine nginx
 # image is ~40MB — far smaller than keeping Node around just to run files.
-# nginx also handles gzip compression, cache headers, and SPA routing
-# (try_files) without any extra configuration.
+#
+# PORT handling: Railway assigns a port via the PORT env var at runtime.
+# The official nginx:alpine image processes files in /etc/nginx/templates/
+# with envsubst on startup — nginx.conf.template uses ${PORT} and the
+# entrypoint substitutes the real value before nginx starts.
 
 # ── Stage 1: build ────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files first so the npm install layer is cached independently
-# from source changes. If package.json hasn't changed, this layer is reused.
 COPY package.json package-lock.json* ./
 RUN npm ci
 
-# Pass VITE_* vars as build args. Vite replaces import.meta.env.VITE_* at
-# build time — the values are embedded in the compiled JS bundle.
-# Railway sets these as environment variables; they are forwarded here via ARG.
+# VITE_* vars are baked into the JS bundle at build time by Vite.
+# They must arrive as build args — runtime environment vars are ignored.
 ARG VITE_API_BASE_URL
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
 
-# Copy source and build. Output lands in /app/dist.
 COPY . .
 RUN npm run build
 
 # ── Stage 2: serve ────────────────────────────────────────────────────────────
 FROM nginx:alpine
 
-# Copy the built static files into nginx's web root.
+# Copy the compiled static files into nginx's web root.
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# SPA routing: any path that doesn't match a real file (e.g. /some/route on
-# refresh) should return index.html so React Router can handle it client-side.
-# We write a minimal nginx config that adds this try_files rule.
-RUN printf 'server {\n\
-  listen 80;\n\
-  root /usr/share/nginx/html;\n\
-  index index.html;\n\
-  location / {\n\
-    try_files $uri $uri/ /index.html;\n\
-  }\n\
-  # Cache static assets aggressively; index.html must not be cached so\n\
-  # users always get the latest JS bundle hash on redeploy.\n\
-  location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {\n\
-    expires 1y;\n\
-    add_header Cache-Control "public, immutable";\n\
-  }\n\
-}\n' > /etc/nginx/conf.d/default.conf
+# The nginx:alpine image's entrypoint runs envsubst on every *.template file
+# in /etc/nginx/templates/ and writes the result to /etc/nginx/conf.d/.
+# This is how we pass the Railway-assigned $PORT to nginx at container startup.
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 
+# Remove the default nginx config so our template is the only one loaded.
+RUN rm -f /etc/nginx/conf.d/default.conf
+
+# EXPOSE is documentation only — Railway ignores it and uses $PORT instead.
 EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]
