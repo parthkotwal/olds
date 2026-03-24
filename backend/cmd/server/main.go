@@ -18,6 +18,7 @@ import (
 	"github.com/olds/backend/internal/graph"
 	"github.com/olds/backend/internal/guardian"
 	"github.com/olds/backend/internal/handler"
+	"github.com/olds/backend/internal/llm"
 	"github.com/olds/backend/internal/middleware"
 	"github.com/olds/backend/internal/mlclient"
 	"github.com/olds/backend/internal/newsapi"
@@ -110,6 +111,17 @@ func main() {
 	behaviorRepo := repository.NewBehaviorRepository(pool)
 	snapshotRepo := repository.NewSnapshotRepository(pool)
 
+	// LLM client is optional — if LLM_API_KEY is not set, connection explanations
+	// are disabled and the sidebar renders connections without explanation text.
+	// This matches the pattern for mlClient and guardianClient above.
+	var llmClient *llm.Client
+	if llmKey := os.Getenv("LLM_API_KEY"); llmKey != "" {
+		llmClient = llm.NewClient(llmKey)
+		log.Println("LLM client configured — connection explanations enabled")
+	} else {
+		log.Println("LLM_API_KEY not set — connection explanations disabled")
+	}
+
 	// ── 7. Hydrate in-memory stores from Postgres ─────────────────────────────
 	// HydrateFromDB runs synchronously before the HTTP server starts so that
 	// the very first request sees the full persisted state. The sequence is:
@@ -130,32 +142,37 @@ func main() {
 	// ── 8. Construct the handler and register routes ──────────────────────────
 	articleHandler := handler.NewArticleHandler(
 		store, client, guardianClient, mlClient, g, bs,
-		articleRepo, behaviorRepo, snapshotRepo,
+		articleRepo, behaviorRepo, snapshotRepo, llmClient,
 	)
 
 	// ── 9. Register routes ────────────────────────────────────────────────────
+	// Set Gin to release mode unless GIN_MODE=debug is explicitly set.
+	// Release mode suppresses the startup route table printout and the
+	// "running in debug mode" warnings — both are noise in Railway logs.
+	if os.Getenv("GIN_MODE") != "debug" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	r := gin.Default()
 
-	// CORS middleware — required so the frontend (localhost:5173) can call the
-	// backend (localhost:8080) without the browser blocking cross-origin requests.
+	// CORS middleware — required so the browser allows the frontend to call
+	// the backend across origins.
 	//
-	// In Go, middleware is a function that wraps a handler. gin.Default() gives
-	// us Logger and Recovery; we add CORS by calling r.Use() with our own
-	// middleware function. r.Use() registers middleware that runs for every request.
+	// In production, FRONTEND_URL must be set to the deployed frontend origin
+	// (e.g. https://olds.up.railway.app). Locally, it defaults to "*" so
+	// docker-compose and direct browser testing both work without extra config.
 	//
-	// The middleware pattern in Go:
-	//   - c.Header() sets a response header
-	//   - c.AbortWithStatus() stops the middleware chain and returns immediately
-	//   - c.Next() passes control to the next handler in the chain
-	//
-	// OPTIONS is the HTTP "preflight" request that browsers send before any
-	// cross-origin POST or GET with custom headers. We need to handle it here
-	// or the browser will block the actual request before it reaches our handlers.
+	// OPTIONS is the HTTP "preflight" request browsers send before any
+	// cross-origin POST or GET with custom headers. We short-circuit it here
+	// with 204 so the real request isn't blocked.
+	corsOrigin := os.Getenv("FRONTEND_URL")
+	if corsOrigin == "" {
+		corsOrigin = "*" // local dev fallback — lock this down in production
+	}
 	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Origin", corsOrigin)
 		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		// Authorization is added here so the browser's CORS preflight allows
-		// the frontend to send the JWT in the Authorization: Bearer header.
+		// Authorization header carries the Supabase JWT from the frontend.
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)

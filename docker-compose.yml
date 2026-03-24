@@ -20,6 +20,9 @@ services:
       # Find this in Supabase dashboard → Settings → API → JWT Secret.
       # Never expose this value to the frontend or commit it to git.
       - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
+      # LLM API key for OpenAI connection explanations (Phase 15).
+      # If unset, connections render without explanation text — graceful degradation.
+      - LLM_API_KEY=${LLM_API_KEY}
     depends_on:
       ml-service:
         # Wait until ml-service passes its healthcheck before starting the backend.
@@ -43,16 +46,17 @@ services:
   frontend:
     build:
       context: ./frontend
+      # VITE_* vars must be passed as build args, not runtime environment vars.
+      # Vite bakes them into the JS bundle at build time — they are not read at
+      # runtime. The Dockerfile declares matching ARG statements for each one.
+      args:
+        - VITE_API_BASE_URL=http://localhost:8080
+        - VITE_SUPABASE_URL=${SUPABASE_URL}
+        - VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
     ports:
-      - "5173:5173"
-    environment:
-      # The browser makes API calls to this URL — must be reachable from the user's
-      # machine (localhost), not from inside Docker (http://backend:8080).
-      - VITE_API_BASE_URL=http://localhost:8080
-      # Supabase public keys — safe to expose to the browser bundle.
-      # VITE_ prefix is required; Vite strips unprefixed vars from the client bundle.
-      - VITE_SUPABASE_URL=${SUPABASE_URL}
-      - VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      # nginx listens on 80 inside the container; we expose it on 5173 locally
+      # so existing bookmarks/dev habits (localhost:5173) still work.
+      - "5173:80"
     depends_on:
       - backend
     restart: unless-stopped

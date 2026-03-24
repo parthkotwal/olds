@@ -18,15 +18,17 @@ const defaultTopN = 10
 const defaultMinWeight = 0.1
 
 // Connection is the per-neighbour element in the /connections response.
-// It bundles the full Article with its edge weight and a flag indicating
-// whether it is from a different topic category than the source.
+// It bundles the full Article with its edge weight, a cross-topic flag, and
+// an LLM-generated explanation of why the two articles are connected.
 //
-// In Go, a struct defined inside a handler file is perfectly fine for response
-// types that are only used in one place. No need for a separate types file.
+// Explanation is populated by enrichWithExplanations() in articles.go.
+// omitempty means it is omitted from JSON when empty — connections without
+// explanations (e.g. when LLM_API_KEY is unset) are still valid.
 type Connection struct {
-	Article    article.Article `json:"article"`
-	Weight     float64         `json:"weight"`
-	CrossTopic bool            `json:"cross_topic"`
+	Article     article.Article `json:"article"`
+	Weight      float64         `json:"weight"`
+	CrossTopic  bool            `json:"cross_topic"`
+	Explanation string          `json:"explanation,omitempty"`
 }
 
 // ConnectionsResponse is the full JSON body returned by GET /articles/:id/connections.
@@ -110,6 +112,10 @@ func (h *ArticleHandler) Connections(c *gin.Context) {
 			CrossTopic: isCrossTopic,
 		})
 	}
+
+	// Enrich each connection with an LLM-generated explanation.
+	// No-op if LLM_API_KEY is not set.
+	connections = h.enrichWithExplanations(sourceArticle, connections)
 
 	c.JSON(http.StatusOK, ConnectionsResponse{
 		Source:      sourceArticle,

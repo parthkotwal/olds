@@ -1,14 +1,14 @@
 package graph
 
-// weight.go contains the three unexported functions that compute edge weights
-// between articles. Nothing outside this package needs to know how weights are
-// computed — callers just call graph.Add() and graph.Neighbors().
+// weight.go contains the functions that compute edge weights between articles,
+// plus SharedEntities which is exported for use by the LLM explanation layer.
 //
-// All three functions are pure (no side effects, no shared state) and therefore
+// All functions are pure (no side effects, no shared state) and therefore
 // safe to call from concurrent goroutines without any locking.
 
 import (
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/olds/backend/internal/article"
@@ -109,6 +109,27 @@ func entityJaccard(a, b []article.Entity) float64 {
 	}
 
 	return float64(intersection) / float64(union)
+}
+
+// SharedEntities returns the high-signal entity texts that appear in both
+// articles. Called by the LLM layer to construct the connection explanation
+// prompt — "shared entities: Xi Jinping, South China Sea" tells the model
+// exactly what drove the edge, producing more precise explanations.
+//
+// The returned slice is sorted for deterministic output (consistent prompts
+// → more consistent LLM responses, and easier caching if needed later).
+func SharedEntities(a, b article.Article) []string {
+	setA := highSignalEntitySet(a.Entities)
+	setB := highSignalEntitySet(b.Entities)
+
+	var shared []string
+	for text := range setA {
+		if _, ok := setB[text]; ok {
+			shared = append(shared, text)
+		}
+	}
+	sort.Strings(shared) // deterministic ordering
+	return shared
 }
 
 // highSignalEntitySet builds a set of normalised entity text strings from a

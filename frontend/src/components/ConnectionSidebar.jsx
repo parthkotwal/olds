@@ -30,7 +30,7 @@ function weightLabel(w) {
  * The cross-topic badge is the visual highlight when the connection crosses categories.
  */
 function ConnectionEntry({ connection, onArticleClick }) {
-  const { article, weight, cross_topic } = connection
+  const { article, weight, cross_topic, explanation } = connection
 
   return (
     <button
@@ -74,8 +74,26 @@ function ConnectionEntry({ connection, onArticleClick }) {
         {article.title}
       </p>
 
+      {/* LLM-generated explanation — streams in after the initial connection
+          render via a separate WebSocket message. */}
+      {explanation && (
+        <p
+          className="text-muted"
+          style={{
+            fontSize: '0.62rem',
+            fontStyle: 'italic',
+            lineHeight: 1.6,
+            marginTop: '0.5rem',
+            paddingTop: '0.4rem',
+            borderTop: '1px solid var(--color-rule)',
+          }}
+        >
+          {explanation}
+        </p>
+      )}
+
       {/* Source + weight tier */}
-      <div className="flex items-center justify-between mt-1">
+      <div className="flex items-center justify-between mt-1.5">
         <span className="text-muted" style={{ fontSize: '0.6rem' }}>
           {article.source}
         </span>

@@ -182,10 +182,8 @@ function FeedView({ articles, loading, error, onArticleClick }) {
 
   if (articles.length === 0) {
     return (
-      <p className="text-muted text-sm py-12">
-        No articles yet. POST to{' '}
-        <code className="font-mono text-ink">http://localhost:8080/ingest</code>{' '}
-        to fetch the latest news.
+      <p className="text-muted text-sm py-12" style={{ fontStyle: 'italic' }}>
+        No articles yet — the feed is loading. Check back in a moment.
       </p>
     )
   }

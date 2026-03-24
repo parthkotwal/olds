@@ -19,7 +19,7 @@ import (
 // Categories is the list of NewsAPI topic categories we ingest.
 // These map reasonably well to the CLAUDE.md interest areas
 // (global affairs → general, sports → sports, etc.).
-var Categories = []string{"general", "technology", "science", "health"}
+var Categories = []string{"general", "technology", "science", "health", "sports", "entertainment"}
 
 // Client is an HTTP client for the NewsAPI.org /v2/top-headlines endpoint.
 //

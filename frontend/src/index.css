@@ -130,3 +130,9 @@ body {
   from { opacity: 0; transform: translateY(-8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* Hide scrollbar on the connection sidebar — it scrolls via trackpad/mouse
+   but we don't want the scrollbar track to visually break the rule border. */
+.sidebar-scroll::-webkit-scrollbar {
+  display: none;
+}

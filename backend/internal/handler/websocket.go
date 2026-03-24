@@ -1,113 +1,87 @@
 package handler
 
-// WebSocket handler for real-time graph traversal.
+// WebSocket handler for real-time graph traversal and streaming LLM explanations.
 //
-// When a user opens an article, the frontend opens a WebSocket connection to
-// GET /ws/connections/:id. This handler:
-//   1. Upgrades the HTTP connection to a WebSocket.
-//   2. Traverses the article graph to find cross-topic neighbours.
-//   3. Pushes the result as a single JSON message.
-//   4. Holds the connection open — the read loop detects when the user
-//      navigates away (client closes the WebSocket) so we clean up.
+// Protocol (two message types):
 //
-// The read-loop-for-disconnect pattern is idiomatic gorilla/websocket:
-// a WebSocket connection has no "done" channel built in, so you must
-// ReadMessage() in a loop to notice when the peer closes the connection.
+//   1. "connections" — sent immediately after graph traversal. Contains the
+//      full connection list with article data and weights, but NO explanations
+//      yet. The frontend renders connections right away without waiting for LLM.
+//
+//   2. "explanation"  — sent once per connection as each LLM call resolves.
+//      Contains { article_id, explanation }. The frontend patches the matching
+//      connection in-place. This streams explanations in as they're ready
+//      rather than blocking until all are done.
+//
+// Why a channel? gorilla/websocket requires single-writer access — two
+// goroutines cannot call WriteJSON concurrently or the connection will corrupt.
+// A channel serializes the concurrent LLM goroutines into a single write loop.
 
 import (
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/olds/backend/internal/graph"
 )
 
 // upgrader converts an HTTP connection into a WebSocket connection.
-// CheckOrigin returns true unconditionally — this is correct for development
-// where the frontend (port 5173) and backend (port 8080) are on different ports.
-// In production you would check r.Header.Get("Origin") against an allow-list.
+// CheckOrigin returns true unconditionally — correct for development where
+// the frontend (port 5173) and backend (port 8080) are on different ports.
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
+	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// WSMessage is the envelope for every message sent over the WebSocket.
-// Using a typed envelope with a "type" field lets the frontend dispatch
-// on message type — useful when we add more message types in Phase 9
-// (e.g. "behavior_ack", "feed_update").
-//
-// The Data field is interface{} (Go's "any type") because different message
-// types carry different payloads. gorilla/websocket's WriteJSON encodes it
-// to JSON via encoding/json — the concrete type at runtime determines the shape.
+// WSMessage is the typed envelope for every message sent over the WebSocket.
 type WSMessage struct {
-	Type string `json:"type"`
-	// Data is encoded as whatever concrete type is stored here at write time.
+	Type string      `json:"type"`
 	Data interface{} `json:"data"`
 }
 
+// explanationUpdate is the payload for "explanation" messages.
+// Sent once per connection as each LLM call resolves.
+type explanationUpdate struct {
+	ArticleID   string `json:"article_id"`
+	Explanation string `json:"explanation"`
+}
+
 // WSConnections handles GET /ws/connections/:id.
-//
-// The HTTP → WebSocket upgrade is transparent to Gin's routing — the upgrade
-// happens inside the handler, and from that point on the connection is a
-// full-duplex WebSocket rather than a request/response pair.
 func (h *ArticleHandler) WSConnections(c *gin.Context) {
 	id := c.Param("id")
 
-	// Look up the source article before upgrading. If the article doesn't
-	// exist we can still return a clean HTTP 404 — once upgraded, we lose
-	// the ability to send normal HTTP status codes.
 	sourceArticle, ok := h.store.GetByID(id)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "article not found", "id": id})
 		return
 	}
 
-	// Upgrade the HTTP connection to a WebSocket.
-	// c.Writer and c.Request are the underlying http.ResponseWriter and *http.Request.
-	// After Upgrade(), writing to c.Writer would panic — all communication
-	// goes through conn from here on.
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		// Upgrade failure is usually a client-side issue (non-WebSocket request).
-		// Gin has already written the error response; we just log and return.
 		log.Printf("ws: upgrade failed for article %s: %v", id, err)
 		return
 	}
-	// defer conn.Close() ensures the connection is cleaned up no matter how
-	// this function exits — normal return, panic, or error.
 	defer conn.Close()
 
 	log.Printf("ws: client connected for article %s", id)
 
 	// ── Graph traversal ───────────────────────────────────────────────────────
-	// Traverse the graph to find the top 10 neighbours with weight ≥ 0.1.
-	// Time the traversal so we can detect when the graph grows large enough
-	// to cause latency problems — a key stress-test observable (Phase 14).
 	traversalStart := time.Now()
 	edges := h.graph.Neighbors(id, 10, 0.1)
 	traversalElapsed := time.Since(traversalStart)
 
-	// 50ms is a generous threshold — in-memory traversal should be <1ms at
-	// typical scales (~500 nodes). Logging here flags when we need to optimise.
 	if traversalElapsed > 50*time.Millisecond {
-		log.Printf("ws: SLOW traversal for article %s: %v (%d nodes in graph)",
-			id, traversalElapsed, h.graph.NodeCount())
+		log.Printf("ws: SLOW traversal for article %s: %v (%d nodes)", id, traversalElapsed, h.graph.NodeCount())
 	} else {
-		log.Printf("ws: traversal for article %s: %v (%d nodes)",
-			id, traversalElapsed, h.graph.NodeCount())
+		log.Printf("ws: traversal for article %s: %v (%d nodes)", id, traversalElapsed, h.graph.NodeCount())
 	}
 
-	// Hydrate each edge into a full Connection (article data + weight + flag).
-	// Reuses the Connection type defined in connections.go — same payload shape
-	// as the REST endpoint, so the frontend can use one type for both.
 	connections := make([]Connection, 0, len(edges))
 	for _, edge := range edges {
 		neighbour, found := h.store.GetByID(edge.ArticleID)
 		if !found {
-			// Article was removed from the store after the edge was computed.
-			// Rare (in-memory store never deletes), but defensive.
 			continue
 		}
 		connections = append(connections, Connection{
@@ -117,36 +91,84 @@ func (h *ArticleHandler) WSConnections(c *gin.Context) {
 		})
 	}
 
-	// ── Push connections to the client ───────────────────────────────────────
-	// WriteJSON encodes the struct to JSON and sends it as a single WebSocket
-	// text frame. The frontend's ws.onmessage handler receives this.
-	msg := WSMessage{
+	// ── Step 1: send connections immediately, no LLM wait ─────────────────────
+	// The frontend renders the sidebar right away. Explanations arrive separately.
+	if err := conn.WriteJSON(WSMessage{
 		Type: "connections",
 		Data: ConnectionsResponse{
 			Source:      sourceArticle,
 			Connections: connections,
 			Count:       len(connections),
 		},
-	}
-	if err := conn.WriteJSON(msg); err != nil {
+	}); err != nil {
 		log.Printf("ws: write failed for article %s: %v", id, err)
 		return
 	}
+	log.Printf("ws: pushed %d connections for article %s — streaming explanations", len(connections), id)
 
-	log.Printf("ws: pushed %d connections for article %s", len(connections), id)
+	// ── Step 2: stream explanations as LLM calls resolve ─────────────────────
+	// Only runs when LLM is configured and there are connections to explain.
+	if h.llmClient != nil && len(connections) > 0 {
+		// Buffered channel — capacity = number of connections so goroutines
+		// never block on send even if the write loop is momentarily slow.
+		updates := make(chan explanationUpdate, len(connections))
 
-	// ── Read loop — stay open until client disconnects ────────────────────────
-	// We don't expect the client to send any messages in Phase 8 (the
-	// connection is server→client only). But we must call ReadMessage() in a
-	// loop to detect when the client closes the tab or navigates away.
-	//
-	// When the client closes the WebSocket, ReadMessage() returns an error
-	// (websocket.CloseError or io.EOF). We break out, deferred conn.Close()
-	// runs, and the goroutine exits — no goroutine leak.
+		var wg sync.WaitGroup
+		for _, item := range connections {
+			wg.Add(1)
+
+			// Capture item as a function argument — avoids loop variable capture.
+			go func(connItem Connection) {
+				defer wg.Done()
+
+				// Serve from cache when available — zero API cost, instant.
+				if exp, ok := h.explanationCache.Get(sourceArticle.ID, connItem.Article.ID); ok {
+					if exp != "" {
+						updates <- explanationUpdate{ArticleID: connItem.Article.ID, Explanation: exp}
+					}
+					return
+				}
+
+				shared := graph.SharedEntities(sourceArticle, connItem.Article)
+				exp, err := h.llmClient.Explain(
+					sourceArticle.Title, sourceArticle.Description, sourceArticle.Category,
+					connItem.Article.Title, connItem.Article.Description, connItem.Article.Category,
+					shared, connItem.Weight,
+				)
+				if err != nil {
+					log.Printf("ws: llm explain failed for %s↔%s: %v", id, connItem.Article.ID, err)
+					return
+				}
+
+				h.explanationCache.Set(sourceArticle.ID, connItem.Article.ID, exp)
+				log.Printf("ws: explanation ready for %s↔%s", id, connItem.Article.ID)
+				updates <- explanationUpdate{ArticleID: connItem.Article.ID, Explanation: exp}
+			}(item)
+		}
+
+		// Close the channel once all goroutines are done so the range loop below
+		// exits cleanly. This runs in its own goroutine so it doesn't block here.
+		go func() {
+			wg.Wait()
+			close(updates)
+		}()
+
+		// Single write loop — gorilla/websocket requires one writer at a time.
+		// The channel serializes all concurrent goroutine results through here.
+		for update := range updates {
+			if err := conn.WriteJSON(WSMessage{Type: "explanation", Data: update}); err != nil {
+				log.Printf("ws: explanation write failed for article %s: %v", id, err)
+				// Drain the channel so the goroutines can exit and be GC'd.
+				for range updates {
+				}
+				return
+			}
+		}
+	}
+
+	// ── Read loop — hold open until client disconnects ────────────────────────
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
-			// Normal close (user navigated away) or unexpected disconnect.
-			// Both are handled the same way: log at debug level and exit.
 			log.Printf("ws: client disconnected from article %s", id)
 			break
 		}

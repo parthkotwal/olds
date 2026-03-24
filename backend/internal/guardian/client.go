@@ -37,7 +37,7 @@ var sectionMap = map[string]string{
 
 // Categories is the list of internal category names we fetch from The Guardian.
 // Keep this in sync with newsapi.Categories to avoid gaps in the feed.
-var Categories = []string{"general", "business", "technology", "science"}
+var Categories = []string{"general", "business", "technology", "science", "sports", "entertainment"}
 
 // htmlTagRe matches any HTML tag. Used by stripHTML to remove markup from
 // article body content before storing it for ML processing and display.

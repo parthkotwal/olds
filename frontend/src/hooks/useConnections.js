@@ -39,10 +39,20 @@ export function useConnections(articleId) {
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data)
+
         if (msg.type === 'connections') {
+          // Initial graph traversal result — render immediately, no LLM wait.
           setConnections(msg.data.connections ?? [])
-          setError(null)   // clear any error from a previous attempt (e.g. StrictMode double-mount)
+          setError(null)
           setLoading(false)
+
+        } else if (msg.type === 'explanation') {
+          const { article_id, explanation } = msg.data
+          setConnections(prev =>
+            prev.map(c =>
+              c.article.id === article_id ? { ...c, explanation } : c
+            )
+          )
         }
       } catch {
         setError('Unexpected response from server.')

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/olds/backend/internal/behavior"
 	"github.com/olds/backend/internal/graph"
 	"github.com/olds/backend/internal/guardian"
+	"github.com/olds/backend/internal/llm"
 	"github.com/olds/backend/internal/mlclient"
 	"github.com/olds/backend/internal/newsapi"
 	"github.com/olds/backend/internal/repository"
@@ -49,6 +51,14 @@ type ArticleHandler struct {
 	// Never nil — constructed in main.go for Phase 14 stress-test observability.
 	snapshotRepo repository.SnapshotRepository
 
+	// llmClient calls OpenAI to generate connection explanations.
+	// May be nil if LLM_API_KEY is not set — both connection handlers degrade
+	// gracefully: connections are returned without an explanation field.
+	llmClient *llm.Client
+	// explanationCache stores LLM-generated explanations by article pair so
+	// the same pair is never sent to OpenAI more than once per process lifetime.
+	explanationCache *llm.ExplanationCache
+
 	// Ingestion telemetry — guarded by ingestMu so the /stats handler can
 	// safely read these from a different goroutine than the ingestion goroutine.
 	ingestMu        sync.Mutex
@@ -72,18 +82,76 @@ func NewArticleHandler(
 	articleRepo repository.ArticleRepository,
 	behaviorRepo repository.BehaviorRepository,
 	snapshotRepo repository.SnapshotRepository,
+	llmClient *llm.Client, // may be nil — LLM explanations are optional
 ) *ArticleHandler {
 	return &ArticleHandler{
-		store:          store,
-		client:         client,
-		guardianClient: guardianClient,
-		mlClient:       mlClient,
-		graph:          g,
-		behaviorStore:  bs,
-		articleRepo:    articleRepo,
-		behaviorRepo:   behaviorRepo,
-		snapshotRepo:   snapshotRepo,
+		store:            store,
+		client:           client,
+		guardianClient:   guardianClient,
+		mlClient:         mlClient,
+		graph:            g,
+		behaviorStore:    bs,
+		articleRepo:      articleRepo,
+		behaviorRepo:     behaviorRepo,
+		snapshotRepo:     snapshotRepo,
+		llmClient:        llmClient,
+		explanationCache: llm.NewExplanationCache(),
 	}
+}
+
+// enrichWithExplanations populates the Explanation field on each Connection
+// by calling the LLM API (or serving from cache). Called by both the REST
+// connections handler and the WebSocket handler.
+//
+// LLM calls are made concurrently using sync.WaitGroup — the same pattern as
+// ingest.go's enrich(). Each goroutine writes to its own index in the slice
+// (safe without a mutex), and we block until all are done before returning.
+//
+// If llmClient is nil, returns the slice unchanged. If an individual call
+// fails, that connection's Explanation is left empty — degrading gracefully.
+func (h *ArticleHandler) enrichWithExplanations(source article.Article, connections []Connection) []Connection {
+	if h.llmClient == nil {
+		return connections
+	}
+
+	var wg sync.WaitGroup
+
+	for i, conn := range connections {
+		wg.Add(1)
+
+		// Capture i and conn as function parameters to avoid the loop variable
+		// capture gotcha. Each goroutine gets its own copy of i and conn.
+		go func(idx int, c Connection) {
+			defer wg.Done()
+
+			// Cache hit — skip the API call entirely.
+			if exp, ok := h.explanationCache.Get(source.ID, c.Article.ID); ok {
+				connections[idx].Explanation = exp
+				return
+			}
+
+			// Compute the shared entity set for the prompt.
+			// graph.SharedEntities is a pure function — safe to call concurrently.
+			shared := graph.SharedEntities(source, c.Article)
+
+			exp, err := h.llmClient.Explain(
+				source.Title, source.Description, source.Category,
+				c.Article.Title, c.Article.Description, c.Article.Category,
+				shared, c.Weight,
+			)
+			if err != nil {
+				log.Printf("llm: explain failed for %s↔%s: %v", source.ID, c.Article.ID, err)
+				return // leave Explanation empty — connection still shows without it
+			}
+
+			h.explanationCache.Set(source.ID, c.Article.ID, exp)
+			connections[idx].Explanation = exp
+			log.Printf("llm: explanation set for %s↔%s: %q", source.ID, c.Article.ID, exp)
+		}(i, conn)
+	}
+
+	wg.Wait()
+	return connections
 }
 
 // List handles GET /articles.

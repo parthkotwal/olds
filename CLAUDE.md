@@ -78,6 +78,7 @@ olds/
 | Auth            | Supabase Auth (Email + Google OAuth) + JWT | Frontend handles email/password and Google OAuth flows, Go backend verifies JWTs |
 | Real-time       | WebSockets (Go)                    | Connection graph updates live as user reads                   |
 | News Ingestion  | NewsAPI / The Guardian API         | Solved problem — use APIs, do not scrape                     |
+| LLM             | Anthropic or OpenAI API            | Connection explanations only; do not use for summarization or other generic features |
 | Deployment      | Railway (services) + Supabase (DB + auth) | Docker containers on Railway; Supabase free tier for data |
 
 ## Phase 1 Build Order (Complete)
@@ -95,9 +96,9 @@ Build vertically, not horizontally. Get a thin slice working end-to-end before e
 9. **Implicit behavior tracking** — Track dwell time, scroll depth, re-opens. Use these signals to re-weight the feed
 10. **Feed decay** — Stories with no new developments lose prominence over time
 
-## Current State (Phases 1–11 Complete)
+## Current State (Phases 1–14 Complete)
 
-All ten initial phases plus Postgres persistence are built and working end-to-end in Docker:
+All Phase 1 items plus auth, frontend polish, and stress-testing are built and working end-to-end in Docker:
 
 - **Go backend** is running with Gin, serving the articles feed, handling ingestion, and managing WebSocket connections.
 - **Python ML service** extracts entities (spaCy) and generates embeddings (sentence-transformers, `all-MiniLM-L6-v2`) via FastAPI.
@@ -109,26 +110,32 @@ All ten initial phases plus Postgres persistence are built and working end-to-en
 - **Implicit behavior tracking** captures dwell time, scroll depth, and re-opens from the frontend. These signals influence feed ranking.
 - **Feed decay** reduces prominence of stories over time when no new developments occur.
 - All services are containerized and run via `docker-compose up`.
+- **Supabase Auth** handles email/password and Google OAuth login. Go backend verifies JWTs via middleware. Feed ranking and behavior signals are keyed per user.
+- **Frontend polish** includes loading states, empty states, graceful feed population, and Playwright tests covering key user flows.
+- **Stress-testing** has been run with scheduled ingestion over multiple days. Findings from this phase inform the remaining work.
 
 ## Phase 2 Build Order
 
 Continue from where Phase 1 left off. Same principle: each phase should be working and testable before moving to the next.
 
-12. **Authentication via Supabase** — Add Supabase Auth for email/password and Google OAuth login. The frontend handles both auth flows using `@supabase/supabase-js` (`supabase.auth.signInWithPassword()` for email, `supabase.auth.signInWithOAuth()` for Google). The Go backend verifies Supabase-issued JWTs via a middleware that checks the `Authorization: Bearer <token>` header and decodes it using the Supabase JWT secret. User records are managed by Supabase Auth. The article graph and connections remain shared across all users, but feed ranking and behavior signals are keyed per user ID extracted from the JWT. No roles, no admin — just identity. See "Local vs Production Environment" section for how Supabase keys are configured.
+12. **Authentication via Supabase** ✅ — Complete. Supabase Auth for email/password and Google OAuth. Go backend verifies JWTs. Feed ranking and behavior signals keyed per user.
 
-13. **Frontend polish for portfolio presentation** — This is about the small details that separate "project" from "product." Add: a subtle loading state when connections are being found (quiet pulsing line in the sidebar), intentional empty states ("No cross-topic connections found — this story stands alone"), smooth first-load experience where the feed populates gracefully rather than popping in all at once, and any micro-interactions that reinforce the editorial design language. Then invoke the **webapp-testing** skill to write Playwright tests covering the key user flows: feed loads, article click-through, connection sidebar appears, WebSocket reconnection after disconnect.
+13. **Frontend polish for portfolio presentation** ✅ — Complete. Loading states, empty states, graceful feed population, micro-interactions reinforcing the editorial design language. Playwright tests covering key user flows.
 
-14. **Stress-test with real usage** — Set up a scheduled goroutine (or cron job) that ingests articles every 30 minutes. Let it run for several days and actually use the app as a reader. Observe what breaks: graph traversal slowing down at scale, decay being too aggressive o r too gentle, entity types (especially locations) creating noisy low-quality connections. Document findings. This phase produces the backlog for the graph improvement phases — do not skip it.
+14. **Stress-test with real usage** ✅ — Complete. Scheduled ingestion running over multiple days. Findings documented and informed the remaining phases.
 
-15. **Connection provenance labels** — When the sidebar shows a connection, explain *why*: "Connected via: South China Sea, Xi Jinping" or "Semantic similarity: trade policy." Surface the entity overlap and similarity scores that already exist in the graph. Critical for demo-ability — without this, the product is a black box.
+15. **LLM-powered connection explanations** — When the sidebar shows a cross-topic connection, use an LLM (via API — Anthropic or OpenAI) to generate a 1–2 sentence natural language explanation of *why* two articles are connected. Feed it the entity overlap list and similarity score that already exist in the graph, plus both article titles and summaries. Example output: "Both stories involve Xi Jinping's trade strategy in the South China Sea, but from different angles — one covers military posturing while the other tracks economic sanctions." This replaces the raw "Connected via: entity, entity" approach with something that makes the product demo-ready and adds a genuine LLM integration to the resume. The Go backend calls the LLM API when serving connections (cache results per article pair to avoid redundant calls). Add `LLM_API_KEY` to `.env.example` and environment variable config.
 
-16. **Graph quality improvements** — Informed by the stress-test findings. At minimum: temporal edge weighting (articles published closer together get stronger connections), and category diversity scoring (explicitly boost cross-topic connections, penalize same-category ones). Additional fixes as identified during the stress-test phase.
+16. **Deploy to Railway + Supabase** — See "Deployment" section below. Deploy all three services to Railway as Docker containers. Point the database connection at Supabase's hosted Postgres. Configure environment variables in Railway's dashboard (including `LLM_API_KEY`). Verify everything works end-to-end at the production URL.
 
-17. **Reading trail visualization** — A page or overlay showing the user's reading path as a visual graph: nodes are articles they've read, edges show connections they followed across topics. This is the demo centerpiece — someone looks at it and immediately understands what Olds does. Keep the visual style consistent with the newspaper aesthetic (no neon force-directed graphs). Consider a clean timeline-with-branches or a styled small-multiples layout.
+### Post-Deploy Stretch Goals (Not Blocking Launch)
 
-18. **Article clustering on the feed page** — Instead of a flat ranked list, group connected stories visually: a lead story with 2–3 related stories tucked underneath, like how a newspaper groups related coverage. This makes the connection engine visible on the feed page itself, not just in the article sidebar.
+These are nice-to-haves. Only pursue after Phase 16 is live and working at a production URL.
 
-19. **Deploy to Railway + Supabase** — See "Deployment" section below. Deploy all three services to Railway as Docker containers. Point the database connection at Supabase's hosted Postgres. Configure environment variables in Railway's dashboard. Verify everything works end-to-end at the production URL.
+- **Article search** — Add a search bar to the feed page. Full-text search against Postgres (using `tsvector`/`tsquery` or `ILIKE` as a starting point). Low complexity, but not a differentiator — do it if you want the UX convenience.
+- **Reading trail visualization** — A page or overlay showing the user's reading path as a visual graph: nodes are articles they've read, edges show connections they followed across topics. This is visually impressive for demos. Keep the visual style consistent with the newspaper aesthetic. Consider a clean timeline-with-branches or a styled small-multiples layout.
+- **Article clustering on the feed page** — Instead of a flat ranked list, group connected stories visually: a lead story with 2–3 related stories tucked underneath, like how a newspaper groups related coverage.
+- **Graph quality improvements** — Temporal edge weighting, category diversity scoring, and any targeted fixes identified during the stress-test phase.
 
 ## Scope Guardrails — Read This Before Every Task
 
@@ -137,7 +144,8 @@ Continue from where Phase 1 left off. Same principle: each phase should be worki
 - **DO NOT** build roles or an admin panel. Supabase Auth handles email/password and Google OAuth; Go backend only verifies JWTs.
 - **DO NOT** replace the in-memory Go graph with a database query layer. Postgres is for persistence; the Go graph is for real-time traversal. Hydrate the graph from Postgres on startup.
 - **DO NOT** add Neo4j unless all Phase 2 items are complete and working.
-- **DO NOT** prematurely optimize. Get it working, then make it fast — but do stress-test (Phase 14) before adding features.
+- **DO NOT** prematurely optimize. Stress-testing (Phase 14) is complete — apply targeted fixes only, not speculative performance work.
+- **DO NOT** use the LLM for generic features (article summarization, chatbots, search). It is scoped to connection explanations only.
 - **DO** keep the three services cleanly separated. They communicate over HTTP and WebSocket only.
 - **DO** write tests. At minimum, test the graph traversal logic, ML service entity extraction, and key frontend flows (Playwright).
 - **DO** use Docker for all services. If it doesn't run in Docker, it doesn't count.
@@ -164,6 +172,7 @@ The project uses different infrastructure locally vs in production, but the appl
 - `SUPABASE_JWT_SECRET` — For JWT verification on the Go backend (never expose to frontend)
 - `NEWSAPI_KEY` — NewsAPI access key
 - `GUARDIAN_API_KEY` — The Guardian Open Platform key
+- `LLM_API_KEY` — API key for Anthropic or OpenAI (used for connection explanations)
 
 The Go backend reads `DATABASE_URL` to connect to Postgres — it doesn't know or care whether that's a local Docker container or Supabase's hosted instance. Same for `SUPABASE_JWT_SECRET` — the JWT verification middleware works identically in both environments.
 
@@ -181,9 +190,9 @@ The Go backend reads `DATABASE_URL` to connect to Postgres — it doesn't know o
 - Internal networking: backend and ml-service communicate via Railway's private network
 - Custom domain or Railway-provided URL for the frontend
 
-**Deployment steps** (Phase 19):
+**Deployment steps** (Phase 16):
 1. Create a Railway project with three services, each pointed at the relevant subdirectory
-2. Set environment variables in Railway (DATABASE_URL pointing to Supabase, plus all Supabase keys and API keys)
+2. Set environment variables in Railway (DATABASE_URL pointing to Supabase, plus all Supabase keys, API keys, and LLM_API_KEY)
 3. Deploy and verify each service starts and connects
 4. Test the full flow end-to-end at the production URL
 5. Set up the scheduled ingestion goroutine to run against production
@@ -231,5 +240,6 @@ This matters because it shapes what we emphasize in the code:
 - Real-time serving (WebSockets)
 - Full-stack (React frontend through to ML inference layer)
 - Implicit feedback system (behavior-driven personalization, no explicit ratings)
+- LLM integration (natural language connection explanations generated from graph data)
 - Docker-based service orchestration with Postgres persistence
 - Cloud deployment (Railway + Supabase)

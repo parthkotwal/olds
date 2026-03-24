@@ -1,32 +1,59 @@
-# Frontend Dockerfile — Vite dev server for local development.
+# Frontend Dockerfile — two-stage production build.
 #
-# For production you would build (npm run build) and serve the static output
-# with nginx. For this project we use the Vite dev server directly, which
-# supports hot module replacement — useful during active development.
+# Stage 1 (builder): installs deps and runs `npm run build`, producing a
+# static /dist folder. Vite bakes VITE_* env vars into the bundle at build
+# time, so they must be passed as build args here.
 #
-# node:20-alpine is a small Alpine Linux base with Node.js 20 LTS (~180MB).
-# The Alpine variant is preferred over the full Debian image (~900MB) for
-# containers that just need to run Node. It lacks some system libs but
-# everything Vite + React needs is available.
+# Stage 2 (runtime): serves the static files with nginx. The Alpine nginx
+# image is ~40MB — far smaller than keeping Node around just to run files.
+# nginx also handles gzip compression, cache headers, and SPA routing
+# (try_files) without any extra configuration.
 
-FROM node:20-alpine
+# ── Stage 1: build ────────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files before source code — same caching strategy as other
-# services: if package.json hasn't changed, npm install is skipped on rebuild.
+# Copy package files first so the npm install layer is cached independently
+# from source changes. If package.json hasn't changed, this layer is reused.
 COPY package.json package-lock.json* ./
+RUN npm ci
 
-# Use npm install rather than npm ci so the Dockerfile works even without a
-# committed lock file (useful when setting up the project for the first time).
-# Once a lock file exists, switch to npm ci for reproducible installs.
-RUN npm install
+# Pass VITE_* vars as build args. Vite replaces import.meta.env.VITE_* at
+# build time — the values are embedded in the compiled JS bundle.
+# Railway sets these as environment variables; they are forwarded here via ARG.
+ARG VITE_API_BASE_URL
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
 
-# Copy application source
+# Copy source and build. Output lands in /app/dist.
 COPY . .
+RUN npm run build
 
-EXPOSE 5173
+# ── Stage 2: serve ────────────────────────────────────────────────────────────
+FROM nginx:alpine
 
-# Vite's dev server binds to localhost by default. --host 0.0.0.0 makes it
-# reachable from outside the container (necessary for Docker port mapping).
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+# Copy the built static files into nginx's web root.
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# SPA routing: any path that doesn't match a real file (e.g. /some/route on
+# refresh) should return index.html so React Router can handle it client-side.
+# We write a minimal nginx config that adds this try_files rule.
+RUN printf 'server {\n\
+  listen 80;\n\
+  root /usr/share/nginx/html;\n\
+  index index.html;\n\
+  location / {\n\
+    try_files $uri $uri/ /index.html;\n\
+  }\n\
+  # Cache static assets aggressively; index.html must not be cached so\n\
+  # users always get the latest JS bundle hash on redeploy.\n\
+  location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {\n\
+    expires 1y;\n\
+    add_header Cache-Control "public, immutable";\n\
+  }\n\
+}\n' > /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

@@ -142,14 +142,23 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
         {/* ── Connection sidebar (desktop) ─────────────────────────────────── */}
         {/* Hidden on mobile — shown as a bottom section there instead.
             On desktop: narrow column separated by a thin vertical rule.
-            This is the design signature of Olds — marginalia, not a widget. */}
-        <aside className="hidden lg:block w-56 flex-shrink-0 pl-8 border-l border-rule self-stretch">
-          <div className="sticky top-24">
-            <ConnectionSidebar
-              articleId={article.id}
-              onArticleClick={onArticleClick}
-            />
-          </div>
+            The aside is itself the sticky + scroll container so it tracks the
+            viewport independently from the article column. */}
+        <aside
+          className="hidden lg:block w-56 flex-shrink-0 pl-8 border-l border-rule sidebar-scroll"
+          style={{
+            position: 'sticky',
+            top: '6rem',
+            maxHeight: 'calc(100vh - 7rem)',
+            overflowY: 'auto',
+            // Hide the scrollbar visually — still scrollable via trackpad/mouse
+            scrollbarWidth: 'none',
+          }}
+        >
+          <ConnectionSidebar
+            articleId={article.id}
+            onArticleClick={onArticleClick}
+          />
         </aside>
 
         {/* ── Connection sidebar (mobile) ──────────────────────────────────── */}
