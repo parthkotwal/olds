@@ -45,7 +45,7 @@ export default function LeadStory({ article, onClick }) {
       {/* Lead image — subordinate to the headline, never leading.
           Constrained width so it supports the story without dominating it. */}
       {article.image_url && (
-        <div className="mb-6 max-w-2xl">
+        <div className="mb-6 max-w-2xl mx-auto">
           <img
             src={article.image_url}
             alt={article.title}
@@ -57,7 +57,7 @@ export default function LeadStory({ article, onClick }) {
 
       {/* Deck copy — the lede beneath the headline */}
       {article.description && (
-        <p className="text-ink text-lg leading-relaxed max-w-3xl mb-6">
+        <p className="text-ink text-lg leading-relaxed max-w-3xl mx-auto mb-6 text-center">
           {article.description}
         </p>
       )}

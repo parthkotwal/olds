@@ -22,7 +22,7 @@ export default function CategoryFilter({ selected, onSelect }) {
   return (
     <nav className="bg-paper border-b border-rule sticky top-0 z-10">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center gap-5 sm:gap-7 py-3 overflow-x-auto no-scrollbar">
+        <div className="flex justify-center items-center gap-5 sm:gap-7 py-3 overflow-x-auto no-scrollbar">
           {CATEGORIES.map(({ value, label }) => (
             <button
               key={value}
