@@ -190,10 +190,6 @@ func main() {
 	r.GET("/articles/:id/connections", articleHandler.Connections)
 	r.GET("/ws/connections/:id", articleHandler.WSConnections)
 	r.POST("/ingest", articleHandler.Ingest)
-	// /stats exposes graph topology, decay distribution, and ingestion telemetry
-	// for Phase 14 stress-test observability. No auth — no user data exposed.
-	r.GET("/stats", articleHandler.Stats)
-	r.GET("/stats/history", articleHandler.StatsHistory)
 
 	// ── Protected routes — valid Supabase JWT required ────────────────────────
 	// Using a route group lets us apply the auth middleware to a subset of routes
@@ -208,6 +204,12 @@ func main() {
 		// POST /behavior requires auth so user IDs are attached to every signal.
 		// This is the foundation for per-user feed personalization.
 		authorized.POST("/behavior", articleHandler.RecordBehavior)
+
+		// GET /stats and /stats/history expose system metrics for Phase 17.
+		// JWT-protected: read-only, but contain operational detail that should
+		// not be publicly accessible.
+		authorized.GET("/stats", articleHandler.Stats)
+		authorized.GET("/stats/history", articleHandler.StatsHistory)
 	}
 
 	// ── 10. Start scheduled ingestion goroutine ───────────────────────────────

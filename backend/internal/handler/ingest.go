@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -74,6 +75,9 @@ func (h *ArticleHandler) Ingest(c *gin.Context) {
 // After each run it updates the ArticleHandler's ingestion telemetry fields
 // so the /stats endpoint can report on ingestion health.
 func (h *ArticleHandler) RunScheduledIngest() error {
+	// Time the full ingest cycle (fetch → enrich → graph.Add) for /stats.
+	ingestStart := time.Now()
+
 	articles, err := h.client.FetchAll()
 	if err != nil {
 		return fmt.Errorf("scheduled ingest: NewsAPI fetch failed: %w", err)
@@ -92,6 +96,9 @@ func (h *ArticleHandler) RunScheduledIngest() error {
 	enriched := enrich(articles, h)
 	h.store.Add(enriched)
 	h.graph.Add(enriched)
+
+	// Record full-cycle latency now that the graph is updated.
+	h.ingestTotalTimings.Add(time.Since(ingestStart))
 
 	// context.Background() is the idiomatic root context for work not tied
 	// to an HTTP request — this goroutine has no request lifecycle to cancel it.
@@ -113,11 +120,17 @@ func (h *ArticleHandler) RunScheduledIngest() error {
 
 	// Update telemetry under lock — the /stats handler reads these from the
 	// main goroutine concurrently with ingestion goroutine writes.
+	now := time.Now()
 	h.ingestMu.Lock()
 	h.ingestRunCount++
-	h.lastIngestAt = time.Now()
+	h.lastIngestAt = now
 	h.lastIngestCount = len(enriched)
 	runCount := h.ingestRunCount
+	// Append per-run entry for 7-day rolling average, bounded to last 500 runs.
+	h.ingestHistory = append(h.ingestHistory, ingestRun{at: now, count: len(enriched)})
+	if len(h.ingestHistory) > 500 {
+		h.ingestHistory = h.ingestHistory[len(h.ingestHistory)-500:]
+	}
 	h.ingestMu.Unlock()
 
 	// Persist a snapshot row so the stress-test history is queryable later.
@@ -229,7 +242,12 @@ func enrich(articles []article.Article, h *ArticleHandler) []article.Article {
 				return
 			}
 
+			// Time the ML service call and track success/failure for /stats.
+			mlStart := time.Now()
 			entities, embedding, err := h.mlClient.Analyze(art.ID, art.RawText)
+			h.mlInferTimings.Add(time.Since(mlStart))
+			atomic.AddInt64(&h.mlAttempts, 1)
+
 			if err != nil {
 				// Log the error but store the article anyway. Partial enrichment
 				// beats losing the article entirely. The graph (Phase 5) will
@@ -238,6 +256,7 @@ func enrich(articles []article.Article, h *ArticleHandler) []article.Article {
 				enriched[idx] = art
 				return
 			}
+			atomic.AddInt64(&h.mlSuccesses, 1)
 
 			// In Go, structs are value types — assigning art makes a copy.
 			// We modify the copy and store it at enriched[idx]. The original

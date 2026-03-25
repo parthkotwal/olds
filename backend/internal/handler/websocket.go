@@ -71,6 +71,7 @@ func (h *ArticleHandler) WSConnections(c *gin.Context) {
 	traversalStart := time.Now()
 	edges := h.graph.Neighbors(id, 10, 0.1)
 	traversalElapsed := time.Since(traversalStart)
+	h.traversalTimings.Add(traversalElapsed) // Phase 17: record for /stats percentiles
 
 	if traversalElapsed > 50*time.Millisecond {
 		log.Printf("ws: SLOW traversal for article %s: %v (%d nodes)", id, traversalElapsed, h.graph.NodeCount())
@@ -93,6 +94,7 @@ func (h *ArticleHandler) WSConnections(c *gin.Context) {
 
 	// ── Step 1: send connections immediately, no LLM wait ─────────────────────
 	// The frontend renders the sidebar right away. Explanations arrive separately.
+	pushStart := time.Now()
 	if err := conn.WriteJSON(WSMessage{
 		Type: "connections",
 		Data: ConnectionsResponse{
@@ -104,6 +106,7 @@ func (h *ArticleHandler) WSConnections(c *gin.Context) {
 		log.Printf("ws: write failed for article %s: %v", id, err)
 		return
 	}
+	h.wsPushTimings.Add(time.Since(pushStart)) // Phase 17: record push latency
 	log.Printf("ws: pushed %d connections for article %s — streaming explanations", len(connections), id)
 
 	// ── Step 2: stream explanations as LLM calls resolve ─────────────────────
@@ -130,18 +133,20 @@ func (h *ArticleHandler) WSConnections(c *gin.Context) {
 				}
 
 				shared := graph.SharedEntities(sourceArticle, connItem.Article)
+				llmStart := time.Now()
 				exp, err := h.llmClient.Explain(
 					sourceArticle.Title, sourceArticle.Description, sourceArticle.Category,
 					connItem.Article.Title, connItem.Article.Description, connItem.Article.Category,
 					shared, connItem.Weight,
 				)
 				if err != nil {
-					log.Printf("ws: llm explain failed for %s↔%s: %v", id, connItem.Article.ID, err)
+					log.Printf("ws: llm explain failed for %s<->%s: %v", id, connItem.Article.ID, err)
 					return
 				}
+				h.llmExplainTimings.Add(time.Since(llmStart)) // Phase 17: record LLM latency
 
 				h.explanationCache.Set(sourceArticle.ID, connItem.Article.ID, exp)
-				log.Printf("ws: explanation ready for %s↔%s", id, connItem.Article.ID)
+				log.Printf("ws: explanation ready for %s<->%s", id, connItem.Article.ID)
 				updates <- explanationUpdate{ArticleID: connItem.Article.ID, Explanation: exp}
 			}(item)
 		}

@@ -18,6 +18,7 @@ package graph
 import (
 	"log"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/olds/backend/internal/article"
@@ -45,6 +46,12 @@ type Graph struct {
 	mu    sync.RWMutex
 	nodes map[string]article.Article
 	edges map[string][]Edge
+
+	// Connection type distribution — updated in Add() under write lock.
+	// Each undirected pair is counted once.
+	connEntityOnly int // jaccard > 0 but cosine == 0
+	connCosineOnly int // cosine > 0 but jaccard == 0
+	connBoth       int // both cosine > 0 and jaccard > 0
 }
 
 // NewGraph returns an empty, ready-to-use Graph.
@@ -115,9 +122,22 @@ func (g *Graph) Add(articles []article.Article) {
 				continue
 			}
 
-			w := edgeWeight(newArt, existingArt)
+			// Compute components separately so we can track connection type.
+			cosine := cosineSimilarity(newArt.Embedding, existingArt.Embedding)
+			jaccard := entityJaccard(newArt.Entities, existingArt.Entities)
+			w := 0.6*cosine + 0.4*jaccard
 			if w <= 0 {
 				continue // discard zero-weight edges — no meaningful connection
+			}
+
+			// Update connection type distribution (each undirected pair once).
+			switch {
+			case cosine > 0 && jaccard > 0:
+				g.connBoth++
+			case jaccard > 0:
+				g.connEntityOnly++
+			default:
+				g.connCosineOnly++
 			}
 
 			// Store both directions so Neighbors() is O(1) per node.
@@ -270,6 +290,153 @@ func (g *Graph) Stats() GraphStats {
 		DensityPct:         densityPct,
 		CrossTopicRatioPct: crossTopicRatioPct,
 	}
+}
+
+// ── Connection quality stats ───────────────────────────────────────────────
+
+// ConnTypeStats holds the distribution of edge types across the graph.
+// Each undirected pair is counted once.
+type ConnTypeStats struct {
+	EntityOnly int `json:"entity_only"` // driven by entity overlap only (cosine ≈ 0)
+	CosineOnly int `json:"cosine_only"` // driven by semantic similarity only (jaccard == 0)
+	Both       int `json:"both"`        // both signals contributed
+}
+
+// ConnTypes returns the current connection type distribution.
+// Uses a read lock — safe to call concurrently with Add() and Neighbors().
+func (g *Graph) ConnTypes() ConnTypeStats {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return ConnTypeStats{
+		EntityOnly: g.connEntityOnly,
+		CosineOnly: g.connCosineOnly,
+		Both:       g.connBoth,
+	}
+}
+
+// EntityCount tracks how many connections mention a specific entity text.
+type EntityCount struct {
+	Entity string `json:"entity"`
+	Count  int    `json:"count"`
+}
+
+// LabelQuality tracks connection quality stats per entity label (PERSON, ORG, GPE, etc.).
+// Low quality is defined as edge weight < lowQualityThreshold.
+type LabelQuality struct {
+	Label           string  `json:"label"`
+	TotalEdges      int     `json:"total_edges"`
+	LowQualityEdges int     `json:"low_quality_edges"`
+	LowQualityPct   float64 `json:"low_quality_pct"`
+}
+
+// lowQualityThreshold is the edge weight below which a connection is considered
+// low quality — weak semantic similarity and minimal entity overlap.
+const lowQualityThreshold = 0.25
+
+// TopEntities returns the n entity texts that appear as shared entities in the
+// most connections. Called on-demand for /stats — not a hot path.
+//
+// For each undirected edge (A, B), shared high-signal entities are found and
+// each entity's counter is incremented. Results are sorted by count descending.
+func (g *Graph) TopEntities(n int) []EntityCount {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	counts := make(map[string]int)
+	for aID, edgeList := range g.edges {
+		aArt := g.nodes[aID]
+		for _, e := range edgeList {
+			if e.ArticleID <= aID {
+				continue // process each undirected pair once (higher ID side)
+			}
+			bArt := g.nodes[e.ArticleID]
+			setA := highSignalEntitySet(aArt.Entities)
+			setB := highSignalEntitySet(bArt.Entities)
+			for text := range setA {
+				if _, ok := setB[text]; ok {
+					counts[text]++
+				}
+			}
+		}
+	}
+
+	result := make([]EntityCount, 0, len(counts))
+	for text, cnt := range counts {
+		result = append(result, EntityCount{Entity: text, Count: cnt})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Count > result[j].Count })
+	if n > 0 && len(result) > n {
+		result = result[:n]
+	}
+	return result
+}
+
+// NoisyLabels returns entity label quality stats sorted by low_quality_pct
+// descending. Labels with the highest fraction of weak connections are
+// candidates for filtering — a key signal identified during stress-testing
+// (Phase 14: GPE/LOC entities creating noisy geographic connections).
+func (g *Graph) NoisyLabels() []LabelQuality {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	type stat struct {
+		total      int
+		lowQuality int
+	}
+	stats := make(map[string]*stat)
+
+	for aID, edgeList := range g.edges {
+		aArt := g.nodes[aID]
+		for _, e := range edgeList {
+			if e.ArticleID <= aID {
+				continue // each undirected pair once
+			}
+			bArt := g.nodes[e.ArticleID]
+			isLow := e.Weight < lowQualityThreshold
+
+			// Build normalised entity→label map for article A.
+			aEntMap := make(map[string]string) // lowered text → label
+			for _, ent := range aArt.Entities {
+				if _, ok := highSignalLabels[ent.Label]; ok {
+					aEntMap[strings.ToLower(ent.Text)] = ent.Label
+				}
+			}
+			// For each high-signal entity in B, if it appears in A, attribute
+			// the connection to that entity's label.
+			for _, ent := range bArt.Entities {
+				if _, ok := highSignalLabels[ent.Label]; ok {
+					normText := strings.ToLower(ent.Text)
+					if label, shared := aEntMap[normText]; shared {
+						if stats[label] == nil {
+							stats[label] = &stat{}
+						}
+						stats[label].total++
+						if isLow {
+							stats[label].lowQuality++
+						}
+					}
+				}
+			}
+		}
+	}
+
+	result := make([]LabelQuality, 0, len(stats))
+	for label, s := range stats {
+		pct := 0.0
+		if s.total > 0 {
+			pct = float64(s.lowQuality) / float64(s.total) * 100
+		}
+		result = append(result, LabelQuality{
+			Label:           label,
+			TotalEdges:      s.total,
+			LowQualityEdges: s.lowQuality,
+			LowQualityPct:   pct,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].LowQualityPct > result[j].LowQualityPct
+	})
+	return result
 }
 
 // totalEdges sums all edge-list lengths. Called within methods that already

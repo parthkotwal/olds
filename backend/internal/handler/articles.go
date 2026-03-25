@@ -15,6 +15,7 @@ import (
 	"github.com/olds/backend/internal/mlclient"
 	"github.com/olds/backend/internal/newsapi"
 	"github.com/olds/backend/internal/repository"
+	"github.com/olds/backend/internal/timing"
 )
 
 // ArticleHandler holds the dependencies needed by article-related route handlers.
@@ -65,6 +66,28 @@ type ArticleHandler struct {
 	ingestRunCount  int       // total number of scheduled ingestion runs completed
 	lastIngestAt    time.Time // wall-clock time of the most recent completed run
 	lastIngestCount int       // articles ingested in the most recent run
+	// ingestHistory records per-run article counts for 7-day rolling average.
+	ingestHistory []ingestRun
+
+	// Phase 17: latency ring buffers (rolling window of last 1,000 samples each).
+	// timing.Buffer has its own internal mutex — safe for concurrent access.
+	traversalTimings  timing.Buffer // graph Neighbors() call duration
+	wsPushTimings     timing.Buffer // WebSocket "connections" message write duration
+	mlInferTimings    timing.Buffer // ML service Analyze() call duration
+	llmExplainTimings timing.Buffer // LLM Explain() call duration
+	ingestTotalTimings timing.Buffer // full ingest cycle: fetch → enrich → graph.Add()
+
+	// ML enrichment success counters — updated with sync/atomic in enrich() goroutines.
+	// Read with atomic.LoadInt64 in the /stats handler.
+	mlAttempts  int64 // total ML Analyze() calls attempted
+	mlSuccesses int64 // successful ML Analyze() calls
+}
+
+// ingestRun captures the timestamp and article count for one scheduled
+// ingestion run. Used to compute the 7-day rolling average articles/day.
+type ingestRun struct {
+	at    time.Time
+	count int
 }
 
 // NewArticleHandler constructs a handler with its dependencies injected.
