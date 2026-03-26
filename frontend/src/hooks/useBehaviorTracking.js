@@ -35,7 +35,7 @@ export function useBehaviorTracking(article, token) {
   const throttleTimerRef = useRef(null)
 
   useEffect(() => {
-    if (!article?.id) return
+    if (!article?.id || !token) return
 
     // ── Initialise for this article ─────────────────────────────────────────
     openedAtRef.current = Date.now()

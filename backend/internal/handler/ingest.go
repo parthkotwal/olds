@@ -219,6 +219,17 @@ func enrich(articles []article.Article, h *ArticleHandler) []article.Article {
 	// Each goroutine writes to a unique index, so no mutex is needed.
 	enriched := make([]article.Article, len(articles))
 
+	// sem is a semaphore implemented as a buffered channel. Sending a token
+	// acquires a slot; receiving one releases it. This caps concurrent ML
+	// requests at 5, preventing the sentence-transformer from receiving a
+	// flood of parallel inference calls that would spike its memory usage
+	// and trigger an OOM kill on Railway.
+	//
+	// In Go, a buffered channel of capacity N is the idiomatic semaphore —
+	// no external library needed.
+	const maxConcurrent = 5
+	sem := make(chan struct{}, maxConcurrent)
+
 	var wg sync.WaitGroup
 
 	for i, a := range articles {
@@ -233,6 +244,11 @@ func enrich(articles []article.Article, h *ArticleHandler) []article.Article {
 		// passing arguments explicitly is clearer and works on all versions.)
 		go func(idx int, art article.Article) {
 			defer wg.Done()
+
+			// Acquire semaphore slot before calling the ML service.
+			// This blocks until fewer than maxConcurrent calls are in flight.
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
 			// Skip enrichment for articles with no text — the ML service
 			// would return an empty entity list and a meaningless zero vector.
