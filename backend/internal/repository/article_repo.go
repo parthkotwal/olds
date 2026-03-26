@@ -91,22 +91,25 @@ func (r *pgxArticleRepo) UpsertBatch(ctx context.Context, articles []article.Art
 		}
 
 		// ── 2. Replace entities ───────────────────────────────────────────────
-		// Delete all existing entities for this article, then insert fresh ones.
-		// This is simpler and safer than diffing the old and new entity lists.
-		// ON DELETE CASCADE on the FK means we could also delete the article
-		// row itself, but explicit delete on article_entities is clearer.
-		if _, err := tx.Exec(ctx,
-			`DELETE FROM article_entities WHERE article_id = $1`, a.ID,
-		); err != nil {
-			return fmt.Errorf("delete entities for article %s: %w", a.ID, err)
-		}
+		// Only replace entities when we have fresh ones from the ML service.
+		// If the ML service was unavailable, a.Entities is empty — in that case
+		// we leave any existing entities intact rather than wiping them.
+		// This prevents re-ingestion without ML from destroying previously
+		// extracted entity data that the graph depends on for edge weights.
+		if len(a.Entities) > 0 {
+			if _, err := tx.Exec(ctx,
+				`DELETE FROM article_entities WHERE article_id = $1`, a.ID,
+			); err != nil {
+				return fmt.Errorf("delete entities for article %s: %w", a.ID, err)
+			}
 
-		for _, ent := range a.Entities {
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO article_entities (article_id, text, label, start_pos, end_pos)
-				VALUES ($1, $2, $3, $4, $5)
-			`, a.ID, ent.Text, ent.Label, ent.Start, ent.End); err != nil {
-				return fmt.Errorf("insert entity for article %s: %w", a.ID, err)
+			for _, ent := range a.Entities {
+				if _, err := tx.Exec(ctx, `
+					INSERT INTO article_entities (article_id, text, label, start_pos, end_pos)
+					VALUES ($1, $2, $3, $4, $5)
+				`, a.ID, ent.Text, ent.Label, ent.Start, ent.End); err != nil {
+					return fmt.Errorf("insert entity for article %s: %w", a.ID, err)
+				}
 			}
 		}
 
