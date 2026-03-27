@@ -3,12 +3,33 @@ server {
   root /usr/share/nginx/html;
   index index.html;
 
+  # Gzip compression — reduces JS/CSS transfer size by ~70%.
+  # Without this the ~400KB bundle ships raw over the wire.
+  gzip on;
+  gzip_vary on;
+  gzip_proxied any;
+  gzip_comp_level 6;
+  gzip_min_length 1000;
+  gzip_types
+    text/plain
+    text/css
+    text/javascript
+    application/javascript
+    application/json
+    image/svg+xml
+    font/woff2;
+
   location / {
     try_files $uri $uri/ /index.html;
+
+    # index.html must not be cached — users need the latest bundle on redeploy.
+    add_header Cache-Control "no-cache, no-store, must-revalidate";
   }
 
-  # Cache hashed static assets aggressively; index.html must not be cached
-  # so users always get the latest JS bundle after a redeploy.
+  # Cache hashed static assets aggressively.
+  # Vite appends a content hash to every JS/CSS filename (e.g. index-STcwr4cD.js)
+  # so a new filename = new file = cache miss. Immutable tells the browser
+  # never to revalidate — safe because the hash changes on every content change.
   location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
     expires 1y;
     add_header Cache-Control "public, immutable";

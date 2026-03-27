@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Olds — Cross-Topic News</title>
 
-    <!-- Preconnect to Google Fonts for performance -->
+    <!-- Preconnect to Google Fonts CDN — establishes the TCP+TLS handshake
+         before the font request fires, saving ~150ms on first load. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 
@@ -13,11 +14,34 @@
       Two-family type system:
         Playfair Display — serif headlines (700, 900 weights)
         Inter            — sans-serif body + meta (400, 500 weights)
+
+      Non-blocking font loading pattern:
+        1. <link rel="preload"> fetches the CSS as a high-priority resource
+           without blocking rendering.
+        2. The <link media="print"> trick loads the stylesheet asynchronously —
+           print stylesheets don't block rendering, and the onload handler
+           switches it to media="all" once downloaded.
+        3. <noscript> is the fallback for JS-disabled environments.
+      Result: the page renders immediately with system fonts, then swaps to
+      Playfair + Inter once they arrive — no blank white flash.
     -->
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Playfair+Display:wght@700;900&display=swap"
+    />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Playfair+Display:wght@700;900&display=swap"
       rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
     />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Playfair+Display:wght@700;900&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
   </head>
   <body>
     <div id="root"></div>

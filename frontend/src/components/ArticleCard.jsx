@@ -86,15 +86,16 @@ export default function ArticleCard({ article, onClick }) {
         {ageLabel && <> · {ageLabel}</>}
       </div>
 
-      {/* Thumbnail — shown only when available; sits above the description.
-          Kept small (max 160px tall) so it doesn't overwhelm the card. */}
+      {/* Thumbnail — aspect-ratio container reserves the exact space before
+          the image downloads, preventing layout shift when it arrives.
+          loading="lazy" skips off-screen images on initial paint. */}
       {article.image_url && (
-        <div className="mb-3">
+        <div style={{ aspectRatio: '16/9', overflow: 'hidden', marginBottom: '0.75rem', background: 'var(--color-rule)' }}>
           <img
             src={article.image_url}
             alt={article.title}
-            className="w-full"
-            style={{ maxHeight: '160px', objectFit: 'cover' }}
+            loading="lazy"
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           />
         </div>
       )}

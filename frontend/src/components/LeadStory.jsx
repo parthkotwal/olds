@@ -42,15 +42,18 @@ export default function LeadStory({ article, onClick }) {
         )}
       </div>
 
-      {/* Lead image — subordinate to the headline, never leading.
-          Constrained width so it supports the story without dominating it. */}
+      {/* Lead image — fetchpriority="high" tells the browser this is the LCP
+          element and to start downloading it as early as possible.
+          The aspect-ratio container reserves space so the headline and dateline
+          above don't jump when the image loads. */}
       {article.image_url && (
-        <div className="mb-6 max-w-2xl mx-auto">
+        <div style={{ aspectRatio: '16/9', overflow: 'hidden', marginBottom: '1.5rem', background: 'var(--color-rule)', maxWidth: '42rem', margin: '0 auto 1.5rem' }}>
           <img
             src={article.image_url}
             alt={article.title}
-            className="w-full"
-            style={{ maxHeight: '420px', objectFit: 'cover' }}
+            fetchPriority="high"
+            loading="eager"
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           />
         </div>
       )}
