@@ -30,6 +30,24 @@ var highSignalLabels = map[string]struct{}{
 	"LAW":    {},
 }
 
+// noisyEntities is a set of entity texts that are too high-frequency to be
+// useful as connection signals. These are legitimate named entities — they are
+// stored in the database — but they appear in such a large fraction of articles
+// that a shared match carries almost no information. Including them inflates
+// Jaccard scores between unrelated articles and accounts for the majority of
+// low-quality edges in the graph.
+//
+// Identified from /stats connection quality data: "us" and "uk" appeared in
+// 6,541 and 3,853 articles respectively, driving 62% of low-quality GPE edges.
+// All values are lowercase (matching the normalisation applied in highSignalEntitySet).
+var noisyEntities = map[string]struct{}{
+	"us":  {},
+	"uk":  {},
+	"u.s": {},
+	// "iran" and "trump" are high-frequency but still specific enough to signal
+	// a real connection — excluded from the noise list intentionally.
+}
+
 // edgeWeight combines cosine similarity and entity Jaccard overlap into a single
 // weight in [0.0, 1.0]. Semantic similarity is weighted slightly higher than
 // entity overlap: 0.6 × cosine + 0.4 × jaccard.
@@ -142,9 +160,14 @@ func SharedEntities(a, b article.Article) []string {
 func highSignalEntitySet(entities []article.Entity) map[string]struct{} {
 	set := make(map[string]struct{})
 	for _, e := range entities {
-		if _, ok := highSignalLabels[e.Label]; ok {
-			set[strings.ToLower(e.Text)] = struct{}{}
+		if _, ok := highSignalLabels[e.Label]; !ok {
+			continue
 		}
+		norm := strings.ToLower(e.Text)
+		if _, noisy := noisyEntities[norm]; noisy {
+			continue
+		}
+		set[norm] = struct{}{}
 	}
 	return set
 }

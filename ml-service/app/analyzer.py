@@ -21,6 +21,31 @@ SPACY_MODEL_NAME = "en_core_web_sm"
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
 
+# Entity text values that spaCy incorrectly extracts as named entities because
+# they appear verbatim in article bylines, footers, or source attributions.
+# These are publication/source names, not real entities in the article's content.
+# Matched case-insensitively against the normalised entity text.
+_SOURCE_BLOCKLIST: frozenset[str] = frozenset(
+    {
+        # News outlets that appear in Guardian/NewsAPI article text
+        "guardian",
+        "the guardian",
+        "associated press",
+        "ap",
+        "reuters",
+        "bloomberg",
+        "bbc",
+        "cnn",
+        "new york times",
+        "nyt",
+        "washington post",
+        "fox news",
+        "the independent",
+        "the telegraph",
+        "sky news",
+    }
+)
+
 
 class Analyzer:
     """Wraps spaCy NER and a sentence-transformer embedding model.
@@ -57,16 +82,23 @@ class Analyzer:
         an empty ents tuple, so this returns [].
         """
         doc = self._nlp(text)
-        return [
-            Entity(
-                text=ent.text,
-                label=ent.label_,  # note: label_ (with underscore) is the string label;
-                # ent.label (without) is an integer hash — always use label_
-                start=ent.start_char,
-                end=ent.end_char,
+        entities = []
+        for ent in doc.ents:
+            # Filter out publication/source names that spaCy picks up from
+            # bylines and footers. They create false connections between
+            # unrelated articles that happen to share the same news outlet.
+            if ent.text.lower() in _SOURCE_BLOCKLIST:
+                continue
+            entities.append(
+                Entity(
+                    text=ent.text,
+                    label=ent.label_,  # note: label_ (with underscore) is the string label;
+                    # ent.label (without) is an integer hash — always use label_
+                    start=ent.start_char,
+                    end=ent.end_char,
+                )
             )
-            for ent in doc.ents
-        ]
+        return entities
 
     def embed(self, text: str) -> list[float]:
         """Generate a dense embedding vector for the text.

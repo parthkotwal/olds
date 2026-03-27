@@ -25,24 +25,32 @@ import (
 // access to h.store, h.client, and h.mlClient. Multiple files can define
 // methods on the same type as long as they share a package.
 func (h *ArticleHandler) Ingest(c *gin.Context) {
-	articles, err := h.client.FetchAll()
+	// Fetch from both sources independently so a NewsAPI rate-limit (429)
+	// does not block Guardian articles from coming through.
+	var articles []article.Article
+	var fetchErrors []string
+
+	newsAPIArticles, err := h.client.FetchAll()
 	if err != nil {
-		// 502 Bad Gateway: our server is up, but upstream (NewsAPI) failed.
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
-		return
+		log.Printf("ingest: NewsAPI fetch failed: %v", err)
+		fetchErrors = append(fetchErrors, "newsapi: "+err.Error())
+	} else {
+		articles = append(articles, newsAPIArticles...)
 	}
 
-	// Also fetch from The Guardian if the client is configured.
-	// Guardian articles are appended to the same slice — the enrichment
-	// pipeline and graph treat them identically to NewsAPI articles.
 	if h.guardianClient != nil {
 		guardianArticles, err := h.guardianClient.FetchAll()
 		if err != nil {
-			// Log but don't abort — partial results from NewsAPI are still useful.
 			log.Printf("ingest: guardian fetch failed: %v", err)
+			fetchErrors = append(fetchErrors, "guardian: "+err.Error())
 		} else {
 			articles = append(articles, guardianArticles...)
 		}
+	}
+
+	if len(articles) == 0 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "all sources failed", "details": fetchErrors})
+		return
 	}
 
 	// Enrich articles with ML data (entities + embedding) if the ML client
@@ -78,9 +86,17 @@ func (h *ArticleHandler) RunScheduledIngest() error {
 	// Time the full ingest cycle (fetch → enrich → graph.Add) for /stats.
 	ingestStart := time.Now()
 
-	articles, err := h.client.FetchAll()
+	// NewsAPI and Guardian are fetched independently. A 429 from NewsAPI (rate
+	// limit) is common on the free tier — it must not abort the Guardian fetch.
+	// We collect articles from whichever sources succeed and proceed with those.
+	var articles []article.Article
+
+	newsAPIArticles, err := h.client.FetchAll()
 	if err != nil {
-		return fmt.Errorf("scheduled ingest: NewsAPI fetch failed: %w", err)
+		// Log but do not return — Guardian may still succeed.
+		log.Printf("scheduled ingest: NewsAPI fetch failed (continuing with Guardian): %v", err)
+	} else {
+		articles = append(articles, newsAPIArticles...)
 	}
 
 	if h.guardianClient != nil {
@@ -91,6 +107,11 @@ func (h *ArticleHandler) RunScheduledIngest() error {
 			articles = append(articles, guardianArticles...)
 			log.Printf("scheduled ingest: fetched %d guardian articles", len(guardianArticles))
 		}
+	}
+
+	// If both sources failed, nothing to do.
+	if len(articles) == 0 {
+		return fmt.Errorf("scheduled ingest: all sources failed, no articles to ingest")
 	}
 
 	enriched := enrich(articles, h)
