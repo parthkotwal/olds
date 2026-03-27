@@ -39,10 +39,28 @@ func main() {
 		log.Fatal("DATABASE_URL environment variable is required")
 	}
 
+	// SUPABASE_JWT_SECRET is the legacy HS256 shared secret. It is optional —
+	// newer Supabase projects use ES256 (asymmetric) and no longer need this.
+	// We keep it so that any HS256 tokens still in circulation (e.g. from before
+	// a key rotation) continue to be accepted until they expire.
 	jwtSecret := os.Getenv("SUPABASE_JWT_SECRET")
-	if jwtSecret == "" {
-		log.Fatal("SUPABASE_JWT_SECRET environment variable is required")
+
+	// SUPABASE_URL is required to fetch the JWKS (public keys for ES256 tokens).
+	supabaseURL := os.Getenv("SUPABASE_URL")
+	if supabaseURL == "" {
+		log.Fatal("SUPABASE_URL environment variable is required")
 	}
+
+	// Fetch ECDSA public keys from Supabase's JWKS endpoint at startup.
+	// These keys are used to verify ES256 tokens issued by Supabase Auth.
+	// We fail fast here — if we can't reach the JWKS endpoint the server
+	// would accept no tokens, so there's no point starting.
+	log.Println("fetching JWKS from Supabase...")
+	ecKeys, err := middleware.FetchJWKS(supabaseURL)
+	if err != nil {
+		log.Fatalf("failed to fetch JWKS: %v", err)
+	}
+	log.Printf("loaded %d ECDSA key(s) from JWKS", len(ecKeys))
 
 	// ── 2. Run database migrations ────────────────────────────────────────────
 	// Apply any pending SQL migrations before opening the connection pool.
@@ -199,7 +217,7 @@ func main() {
 	// In Go/Gin, middleware is just a handler that calls c.Next() to pass control
 	// to the next handler in the chain, or c.Abort() to stop the chain early.
 	authorized := r.Group("/")
-	authorized.Use(middleware.Auth(jwtSecret))
+	authorized.Use(middleware.Auth(jwtSecret, ecKeys))
 	{
 		// POST /behavior requires auth so user IDs are attached to every signal.
 		// This is the foundation for per-user feed personalization.
