@@ -6,7 +6,7 @@
 
 ---
 
-![Olds feed and connection sidebar](docs/screenshot.png)
+![Olds feed and connection sidebar](docs/docs/olds-gif-demo.gif)
 
 ---
 
