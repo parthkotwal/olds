@@ -232,7 +232,7 @@ func main() {
 
 	// ── 10. Start scheduled ingestion goroutine ───────────────────────────────
 	// Runs immediately on startup, then repeats every INGEST_INTERVAL (default
-	// 30 minutes). The interval is configurable so stress-testing can use a
+	// 24 hours). The interval is configurable so stress-testing can use a
 	// shorter cycle (e.g. INGEST_INTERVAL=5m) without changing code.
 	//
 	// Why a goroutine? r.Run() below blocks forever — it IS the server loop.
@@ -252,14 +252,14 @@ func main() {
 		}
 
 		// Parse ingestion interval from env — defaults to 30 minutes.
-		// time.ParseDuration understands "30m", "1h", "5m30s", etc.
-		interval := 30 * time.Minute
+		// time.ParseDuration understands "24h", "1h", "5m30s", etc.
+		interval := 24 * time.Hour
 		if v := os.Getenv("INGEST_INTERVAL"); v != "" {
 			if d, err := time.ParseDuration(v); err == nil && d > 0 {
 				interval = d
 				log.Printf("ingest interval overridden to %v via INGEST_INTERVAL", interval)
 			} else {
-				log.Printf("invalid INGEST_INTERVAL %q — using default 30m", v)
+				log.Printf("invalid INGEST_INTERVAL %q — using default 24h", v)
 			}
 		}
 

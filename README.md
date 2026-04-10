@@ -56,7 +56,7 @@ flowchart LR
 | Enrichment success rate | >95% |
 | Graph traversal (median) | TBD<!-- TODO: fill from /stats after 1 week --> |
 | WebSocket push latency (median) | TBD<!-- TODO: fill from /stats after 1 week --> |
-| ML inference per article (median) | TBD<!-- TODO: fill from /stats after 1 week --> |
+| ML inference per article (median) | 565 ms |
 
 ## Local development
 
