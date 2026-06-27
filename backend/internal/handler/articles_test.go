@@ -37,6 +37,11 @@ func (fakeSnapshotRepo) LoadRecent(context.Context, int) ([]repository.Snapshot,
 
 func newTestHandler(t *testing.T) *ArticleHandler {
 	t.Helper()
+	return newTestHandlerWithHydration(t, true)
+}
+
+func newTestHandlerWithHydration(t *testing.T, markHydrated bool) *ArticleHandler {
+	t.Helper()
 
 	store := article.NewStore()
 	behaviorStore := behavior.NewStore()
@@ -96,7 +101,9 @@ func newTestHandler(t *testing.T) *ArticleHandler {
 		fakeSnapshotRepo{},
 		nil,
 	)
-	h.MarkHydrated()
+	if markHydrated {
+		h.MarkHydrated()
+	}
 	return h
 }
 
@@ -228,5 +235,32 @@ func TestConnectionsReturnWhyConnectedBreakdown(t *testing.T) {
 	if conn.Breakdown.SemanticPct+conn.Breakdown.EntityPct < 99.9 {
 		t.Fatalf("expected contribution percentages near 100, got semantic=%.2f entity=%.2f",
 			conn.Breakdown.SemanticPct, conn.Breakdown.EntityPct)
+	}
+}
+
+func TestConnectionsUseOnDemandFallbackBeforeGraphHydrationReady(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := newTestHandlerWithHydration(t, false)
+
+	router := gin.New()
+	router.GET("/articles/:id/connections", h.Connections)
+
+	req := httptest.NewRequest(http.MethodGet, "/articles/older-world/connections?top_n=2&min_weight=0.1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 from cold-start fallback, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body ConnectionsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Connections) == 0 {
+		t.Fatal("expected fallback to compute at least one connection")
+	}
+	if len(body.Connections[0].Breakdown.SharedEntities) == 0 {
+		t.Fatalf("expected fallback breakdown shared entities, got %#v", body.Connections[0].Breakdown)
 	}
 }

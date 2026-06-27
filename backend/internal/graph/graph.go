@@ -8,8 +8,9 @@
 // The combined edge weight is in [0.0, 1.0]. Edges with weight 0 are not stored.
 //
 // Locking model: sync.RWMutex, same pattern as article.Store.
-//   Add()      — write lock (infrequent, called at ingestion time)
-//   Neighbors() — read lock  (hot path, one call per article open)
+//
+//	Add()      — write lock (infrequent, called at ingestion time)
+//	Neighbors() — read lock  (hot path, one call per article open)
 //
 // Multiple concurrent Neighbors() calls proceed in parallel without blocking
 // each other. Add() blocks all readers for the duration of the batch.
@@ -191,6 +192,36 @@ func (g *Graph) Neighbors(id string, topN int, minWeight float64) []Edge {
 	return filtered
 }
 
+// Related computes top-N neighbours for source by scanning a candidate slice.
+// It is used as a cold-start fallback before the precomputed graph has finished
+// hydrating. This is O(N) for one article, which is acceptable for a single
+// request and avoids showing an empty or failed connection sidebar.
+func Related(source article.Article, candidates []article.Article, topN int, minWeight float64) []Edge {
+	edges := make([]Edge, 0, topN)
+	for _, candidate := range candidates {
+		if candidate.ID == source.ID {
+			continue
+		}
+
+		w := edgeWeight(source, candidate)
+		if w < minWeight {
+			continue
+		}
+
+		edges = append(edges, Edge{ArticleID: candidate.ID, Weight: w})
+	}
+
+	sort.Slice(edges, func(i, j int) bool {
+		return edges[i].Weight > edges[j].Weight
+	})
+
+	if topN > 0 && len(edges) > topN {
+		edges = edges[:topN]
+	}
+
+	return edges
+}
+
 // NodeCount returns the number of articles (nodes) in the graph.
 func (g *Graph) NodeCount() int {
 	g.mu.RLock()
@@ -210,13 +241,13 @@ func (g *Graph) EdgeCount() int {
 // GraphStats is a snapshot of the graph's topology at a point in time.
 // Returned by Stats() and exposed via GET /stats for stress-test observability.
 type GraphStats struct {
-	NodeCount       int     `json:"node_count"`
-	DirectedEdges   int     `json:"directed_edges"`  // each undirected edge stored twice
-	UniqueEdges     int     `json:"unique_edges"`     // undirected edge count = directed/2
-	AvgEdgesPerNode float64 `json:"avg_edges_per_node"`
-	IsolatedNodes   int     `json:"isolated_nodes"`  // nodes with zero edges (no connections found)
-	MaxEdgesPerNode int     `json:"max_edges_per_node"`
-	DensityPct      float64 `json:"density_pct"`          // unique_edges / max_possible_edges × 100
+	NodeCount          int     `json:"node_count"`
+	DirectedEdges      int     `json:"directed_edges"` // each undirected edge stored twice
+	UniqueEdges        int     `json:"unique_edges"`   // undirected edge count = directed/2
+	AvgEdgesPerNode    float64 `json:"avg_edges_per_node"`
+	IsolatedNodes      int     `json:"isolated_nodes"` // nodes with zero edges (no connections found)
+	MaxEdgesPerNode    int     `json:"max_edges_per_node"`
+	DensityPct         float64 `json:"density_pct"`           // unique_edges / max_possible_edges × 100
 	CrossTopicRatioPct float64 `json:"cross_topic_ratio_pct"` // % of edges that bridge different categories
 }
 

@@ -10,6 +10,8 @@ import { useState, useEffect } from 'react'
 const WS_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080')
   .replace(/^http/, 'ws')
 
+const RETRY_DELAYS_MS = [0, 2000, 5000, 10000, 15000, 30000]
+
 /**
  * useConnections opens a WebSocket to /ws/connections/:articleId,
  * receives the graph traversal result, and returns it as React state.
@@ -29,58 +31,79 @@ export function useConnections(articleId) {
   useEffect(() => {
     if (!articleId) return
 
+    let cancelled = false
+    let retryTimer = null
+    let ws = null
+
     // Reset state whenever articleId changes (user opens a different article).
     setConnections([])
     setLoading(true)
     setError(null)
 
-    const ws = new WebSocket(`${WS_BASE}/ws/connections/${articleId}`)
+    function connect(attempt = 0) {
+      if (cancelled) return
 
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data)
+      let receivedInitialMessage = false
+      ws = new WebSocket(`${WS_BASE}/ws/connections/${articleId}`)
 
-        if (msg.type === 'connections') {
-          // Initial graph traversal result — render immediately, no LLM wait.
-          setConnections(msg.data.connections ?? [])
-          setError(null)
-          setLoading(false)
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
 
-        } else if (msg.type === 'explanation') {
-          const { article_id, explanation } = msg.data
-          setConnections(prev =>
-            prev.map(c =>
-              c.article.id === article_id ? { ...c, explanation } : c
+          if (msg.type === 'connections') {
+            receivedInitialMessage = true
+            // Initial graph traversal result — render immediately, no LLM wait.
+            setConnections(msg.data.connections ?? [])
+            setError(null)
+            setLoading(false)
+
+          } else if (msg.type === 'explanation') {
+            const { article_id, explanation } = msg.data
+            setConnections(prev =>
+              prev.map(c =>
+                c.article.id === article_id ? { ...c, explanation } : c
+              )
             )
-          )
+          }
+        } catch {
+          setError('Unexpected response from server.')
+          setLoading(false)
         }
-      } catch {
-        setError('Unexpected response from server.')
+      }
+
+      ws.onerror = () => {
+        // The browser does not expose WebSocket HTTP status codes. During
+        // backend cold starts, Railway returns a temporary 503 while the graph
+        // hydrates; onclose below handles retry without flashing an error.
+      }
+
+      ws.onclose = () => {
+        if (cancelled || receivedInitialMessage) {
+          setLoading(false)
+          return
+        }
+
+        const nextAttempt = attempt + 1
+        if (nextAttempt < RETRY_DELAYS_MS.length) {
+          retryTimer = setTimeout(() => connect(nextAttempt), RETRY_DELAYS_MS[nextAttempt])
+          return
+        }
+
+        setError('Could not connect to the graph service.')
         setLoading(false)
       }
     }
 
-    ws.onerror = () => {
-      // onerror fires before onclose when the connection cannot be established
-      // (e.g. backend not running, wrong port). We set a user-visible error
-      // and stop showing the loading state.
-      setError('Could not connect to the graph service.')
-      setLoading(false)
-    }
-
-    ws.onclose = () => {
-      // Normal close: server finished sending and held the connection until
-      // the client (us) closed it on unmount. Loading may still be true if
-      // the server closed before sending a message — clear it.
-      setLoading(false)
-    }
+    connect()
 
     // Cleanup: close the WebSocket when the component unmounts or articleId
     // changes. This is the React equivalent of "componentWillUnmount".
     // Without this, navigating away would leave an open connection on the
     // backend holding a goroutine open per article viewed.
     return () => {
-      ws.close()
+      cancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
+      if (ws) ws.close()
     }
   }, [articleId])
 

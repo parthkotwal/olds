@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/olds/backend/internal/article"
 	"github.com/olds/backend/internal/graph"
 )
 
@@ -30,7 +31,7 @@ type ConnectionsResponse struct {
 
 // Connections handles GET /articles/:id/connections.
 func (h *ArticleHandler) Connections(c *gin.Context) {
-	if !h.waitForHydration(c) {
+	if !h.waitForArticleStore(c) {
 		return
 	}
 
@@ -49,7 +50,7 @@ func (h *ArticleHandler) Connections(c *gin.Context) {
 	minWeight := parseFloatQuery(c, "min_weight", defaultMinWeight)
 	crossTopicOnly := parseBoolQuery(c, "cross_topic", false)
 
-	edges := h.graph.Neighbors(id, topN, minWeight)
+	edges := h.connectionEdges(sourceArticle, topN, minWeight)
 
 	connections := make([]Connection, 0, len(edges))
 	for _, edge := range edges {
@@ -79,6 +80,14 @@ func (h *ArticleHandler) Connections(c *gin.Context) {
 		Connections: connections,
 		Count:       len(connections),
 	})
+}
+
+func (h *ArticleHandler) connectionEdges(sourceArticle article.Article, topN int, minWeight float64) []graph.Edge {
+	if h.isHydrated() {
+		return h.graph.Neighbors(sourceArticle.ID, topN, minWeight)
+	}
+
+	return graph.Related(sourceArticle, h.store.GetAll(), topN, minWeight)
 }
 
 func parseIntQuery(c *gin.Context, key string, defaultVal int) int {

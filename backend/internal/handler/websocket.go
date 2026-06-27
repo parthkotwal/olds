@@ -27,7 +27,7 @@ type explanationUpdate struct {
 
 // WSConnections handles GET /ws/connections/:id.
 func (h *ArticleHandler) WSConnections(c *gin.Context) {
-	if !h.waitForHydration(c) {
+	if !h.waitForArticleStore(c) {
 		return
 	}
 
@@ -49,7 +49,7 @@ func (h *ArticleHandler) WSConnections(c *gin.Context) {
 	log.Printf("ws: client connected for article %s", id)
 
 	traversalStart := time.Now()
-	edges := h.graph.Neighbors(id, 10, 0.1)
+	edges := h.connectionEdges(sourceArticle, 10, 0.1)
 	traversalElapsed := time.Since(traversalStart)
 	h.traversalTimings.Add(traversalElapsed)
 

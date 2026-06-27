@@ -174,6 +174,15 @@ func (h *ArticleHandler) waitForArticleStore(c *gin.Context) bool {
 	return h.waitForHydration(c)
 }
 
+func (h *ArticleHandler) isHydrated() bool {
+	select {
+	case <-h.hydrationReady:
+		return true
+	default:
+		return false
+	}
+}
+
 // enrichWithExplanations populates the Explanation field on each Connection
 // by calling the LLM API (or serving from cache). Called by both the REST
 // connections handler and the WebSocket handler.
