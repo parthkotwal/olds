@@ -1,5 +1,7 @@
+import { useState, useEffect } from 'react'
 import ConnectionSidebar from './ConnectionSidebar'
 import { useBehaviorTracking } from '../hooks/useBehaviorTracking'
+import { fetchArticleById } from '../api/articles.js'
 
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString('en-US', {
@@ -9,34 +11,26 @@ function formatDate(dateStr) {
   })
 }
 
-// ArticleView renders the article reading experience.
-//
-// Layout:
-//   [← Back to feed]
-//   ┌──────────────────────────────────────┬────────────┐
-//   │  Article column (~680px max-width)   │  Sidebar   │
-//   │  category · headline · dateline      │ CONNECTIONS│
-//   │  body text · read original →         │  (Phase 8) │
-//   └──────────────────────────────────────┴────────────┘
-//
-// The sidebar is separated by a thin vertical rule and feels like
-// marginalia — it's intentionally narrow and quiet. Phase 8 replaces
-// the placeholder with real WebSocket-driven connections.
-//
-// Props:
-//   article  Article  — the article to display
-//   token    string   — Supabase JWT, forwarded to behavior tracking
-//   onBack   fn       — called when "Back to feed" is clicked
 export default function ArticleView({ article, token, onBack, onArticleClick }) {
-  // Track reading signals — dwell time, scroll depth, re-opens.
-  // This hook fires immediately on mount (reopen signal) and sends
-  // dwell + scroll_depth to the backend when the component unmounts.
-  // The token is passed through so the backend can key signals to the user.
-  useBehaviorTracking(article, token)
+  // article prop is the slim summary from the feed. Fetch full detail for
+  // raw_text and entities on mount.
+  const [fullArticle, setFullArticle] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchArticleById(article.id)
+      .then(data => { if (!cancelled) setFullArticle(data) })
+      .catch(() => { /* Fall back to the summary data we already have */ })
+    return () => { cancelled = true }
+  }, [article.id])
+
+  // Use full article data when available, fall back to summary.
+  const display = fullArticle ?? article
+
+  useBehaviorTracking(display, token)
 
   return (
     <div>
-      {/* Back navigation */}
       <button
         onClick={onBack}
         className="label-caps text-muted hover:text-ink transition-colors duration-150 mb-8 inline-block"
@@ -44,58 +38,43 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
         ← Back to feed
       </button>
 
-      {/* Two-column layout: article + connection sidebar */}
       <div className="flex items-start gap-0 lg:gap-12">
-
-        {/* ── Article column ──────────────────────────────────────────────── */}
         <article className="flex-1 min-w-0 max-w-article">
-
-          {/* Category */}
           <div className="label-caps text-accent mb-4">
             <span className="mr-1.5">●</span>
-            {article.category}
+            {display.category}
           </div>
 
-          {/* Headline */}
           <h1
             className="font-display font-black text-ink leading-tight mb-6"
             style={{ fontSize: 'clamp(1.75rem, 4vw, 3rem)' }}
           >
-            {article.title}
+            {display.title}
           </h1>
 
-          {/* Dateline */}
           <div className="label-caps text-muted mb-6">
-            {article.source}
-            {article.published_at && (
-              <> · {formatDate(article.published_at)}</>
+            {display.source}
+            {display.published_at && (
+              <> · {formatDate(display.published_at)}</>
             )}
           </div>
 
-          {/* Lead image — full width of the article column, below the dateline */}
-          {article.image_url && (
+          {display.image_url && (
             <div className="mb-7">
               <img
-                src={article.image_url}
-                alt={article.title}
+                src={display.image_url}
+                alt={display.title}
                 className="w-full"
                 style={{ maxHeight: '480px', objectFit: 'cover' }}
               />
             </div>
           )}
 
-          {/* Section rule */}
           <div className="border-t border-rule mb-7" />
 
-          {/* Body copy.
-              Priority: raw_text (Guardian full article, plain text after HTML strip)
-                        > description (NewsAPI editorial summary, always short)
-                        > fallback message.
-              Guardian articles have several paragraphs of prose in raw_text.
-              NewsAPI articles will show the description until a paid key is used. */}
-          {(article.raw_text || article.description) ? (
+          {(display.raw_text || display.description) ? (
             <div className="text-ink text-base leading-loose mb-10 space-y-4">
-              {(article.raw_text || article.description)
+              {(display.raw_text || display.description)
                 .split('\n')
                 .filter(p => p.trim())
                 .map((paragraph, i) => (
@@ -108,10 +87,9 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
             </p>
           )}
 
-          {/* External link to original article */}
-          {article.url && (
+          {display.url && (
             <a
-              href={article.url}
+              href={display.url}
               target="_blank"
               rel="noopener noreferrer"
               className="label-caps text-muted hover:text-accent transition-colors duration-150"
@@ -120,12 +98,11 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
             </a>
           )}
 
-          {/* Entity tags — shown only if the ML service has run on this article */}
-          {article.entities && article.entities.length > 0 && (
+          {display.entities && display.entities.length > 0 && (
             <div className="mt-10 pt-6 border-t border-rule">
               <div className="label-caps text-muted mb-3">Entities detected</div>
               <div className="flex flex-wrap gap-2">
-                {article.entities.map((entity, i) => (
+                {display.entities.map((entity, i) => (
                   <span
                     key={i}
                     className="label-caps text-muted border border-rule px-2 py-0.5"
@@ -139,11 +116,6 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
           )}
         </article>
 
-        {/* ── Connection sidebar (desktop) ─────────────────────────────────── */}
-        {/* Hidden on mobile — shown as a bottom section there instead.
-            On desktop: narrow column separated by a thin vertical rule.
-            The aside is itself the sticky + scroll container so it tracks the
-            viewport independently from the article column. */}
         <aside
           className="hidden lg:block w-56 flex-shrink-0 pl-8 border-l border-rule sidebar-scroll"
           style={{
@@ -151,7 +123,6 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
             top: '6rem',
             maxHeight: 'calc(100vh - 7rem)',
             overflowY: 'auto',
-            // Hide the scrollbar visually — still scrollable via trackpad/mouse
             scrollbarWidth: 'none',
           }}
         >
@@ -161,7 +132,6 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
           />
         </aside>
 
-        {/* ── Connection sidebar (mobile) ──────────────────────────────────── */}
         <div className="lg:hidden mt-10 pt-6 border-t border-rule w-full">
           <ConnectionSidebar
             articleId={article.id}

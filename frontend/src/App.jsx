@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from './lib/supabase'
 import Header from './components/Header.jsx'
 import CategoryFilter from './components/CategoryFilter.jsx'
@@ -8,43 +8,25 @@ import ArticleView from './components/ArticleView.jsx'
 import LoginModal from './components/LoginModal.jsx'
 import { fetchArticles } from './api/articles.js'
 
-// App is the root state machine for the whole UI.
-//
-// Auth model (Phase 13 change):
-//   The feed is public — anyone can browse headlines without signing in.
-//   Signing in is only required to read an article (which enables behavior
-//   tracking, personalized ranking, and connection history).
-//
-//   When an unauthenticated user clicks an article:
-//     1. The article is saved in pendingArticleRef
-//     2. The LoginModal appears
-//     3. After sign-in, onAuthStateChange fires, finds the pending article,
-//        and opens it automatically — the user lands exactly where they intended.
+const PAGE_SIZE = 30
+
 export default function App() {
-  // ── Auth state ─────────────────────────────────────────────────────────────
   const [session, setSession] = useState(null)
-  // authChecked: true once getSession() has resolved. Prevents the Header from
-  // flickering between "Sign in" and the email before auth is confirmed.
   const [authChecked, setAuthChecked] = useState(false)
   const [loginModalOpen, setLoginModalOpen] = useState(false)
 
-  // pendingArticleRef stores the article the user tried to open before login.
-  // A ref (not state) because we read it inside the onAuthStateChange callback —
-  // using state here would require it in the effect's dependency array, which
-  // would re-register the subscription on every click. A ref avoids that.
   const pendingArticleRef = useRef(null)
 
-  // ── Feed state ─────────────────────────────────────────────────────────────
   const [articles, setArticles] = useState([])
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [selectedArticle, setSelectedArticle] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState(null)
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
 
-  // ── Auth effect ────────────────────────────────────────────────────────────
   useEffect(() => {
-    // Resolve the current session from localStorage (instant) or from the URL
-    // hash after an OAuth / magic-link redirect.
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setAuthChecked(true)
@@ -55,8 +37,6 @@ export default function App() {
         setSession(session)
 
         if (session) {
-          // User just signed in. If there's a pending article (they clicked
-          // before logging in), open it now and clear the pending state.
           if (pendingArticleRef.current) {
             setSelectedArticle(pendingArticleRef.current)
             pendingArticleRef.current = null
@@ -64,30 +44,35 @@ export default function App() {
           }
           setLoginModalOpen(false)
         } else {
-          // User signed out — return to the feed.
           setSelectedArticle(null)
         }
       }
     )
 
     return () => subscription.unsubscribe()
-  }, []) // empty deps — the callback captures pendingArticleRef, which is stable
+  }, [])
 
   async function handleSignOut() {
     await supabase.auth.signOut()
-    // onAuthStateChange will fire with null session → setSelectedArticle(null)
   }
 
-  // ── Feed effect ────────────────────────────────────────────────────────────
+  // Initial load and category change
   useEffect(() => {
     let cancelled = false
 
     async function load() {
       setLoading(true)
       setError(null)
+      setPage(1)
+      setArticles([])
       try {
-        const data = await fetchArticles(selectedCategory === 'all' ? '' : selectedCategory)
-        if (!cancelled) setArticles(data)
+        const category = selectedCategory === 'all' ? '' : selectedCategory
+        const data = await fetchArticles({ category, page: 1, pageSize: PAGE_SIZE })
+        if (!cancelled) {
+          setArticles(data.articles)
+          setTotal(data.total)
+          setPage(1)
+        }
       } catch (err) {
         if (!cancelled) setError(err.message)
       } finally {
@@ -99,7 +84,24 @@ export default function App() {
     return () => { cancelled = true }
   }, [selectedCategory])
 
-  // ── Handlers ───────────────────────────────────────────────────────────────
+  const hasMore = articles.length < total
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    try {
+      const nextPage = page + 1
+      const category = selectedCategory === 'all' ? '' : selectedCategory
+      const data = await fetchArticles({ category, page: nextPage, pageSize: PAGE_SIZE })
+      setArticles(prev => [...prev, ...data.articles])
+      setPage(nextPage)
+    } catch (err) {
+      // Silently fail — user can retry
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [page, selectedCategory, loadingMore, hasMore])
+
   function handleCategorySelect(category) {
     setSelectedCategory(category)
     setSelectedArticle(null)
@@ -107,7 +109,6 @@ export default function App() {
 
   function handleArticleClick(article) {
     if (!session) {
-      // Save where they were trying to go, then prompt login.
       pendingArticleRef.current = article
       setLoginModalOpen(true)
       return
@@ -120,15 +121,9 @@ export default function App() {
     setSelectedArticle(null)
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-paper">
       <Header
-        // Three distinct states for the auth strip in the Header:
-        //   undefined → auth still resolving, show nothing (no flicker)
-        //   null      → auth resolved, no session → show "Sign in"
-        //   string    → signed in → show email + "Sign out"
-        // `?? null` converts the `undefined` from optional chaining into null.
         userEmail={authChecked ? (session?.user?.email ?? null) : undefined}
         onSignOut={session ? handleSignOut : null}
         onSignIn={() => setLoginModalOpen(true)}
@@ -147,13 +142,15 @@ export default function App() {
           <FeedView
             articles={articles}
             loading={loading}
+            loadingMore={loadingMore}
+            hasMore={hasMore}
             error={error}
             onArticleClick={handleArticleClick}
+            onLoadMore={loadMore}
           />
         )}
       </main>
 
-      {/* Login modal — rendered at the root so it sits above everything */}
       {loginModalOpen && (
         <LoginModal onClose={() => {
           setLoginModalOpen(false)
@@ -164,10 +161,7 @@ export default function App() {
   )
 }
 
-// FeedView is the public landing experience — visible to all users.
-// Article cards fade in with a gentle stagger (50ms per card, up to 600ms total)
-// so the feed populates gracefully rather than appearing all at once.
-function FeedView({ articles, loading, error, onArticleClick }) {
+function FeedView({ articles, loading, loadingMore, hasMore, error, onArticleClick, onLoadMore }) {
   if (loading) {
     return <FeedSkeleton />
   }
@@ -192,7 +186,6 @@ function FeedView({ articles, loading, error, onArticleClick }) {
 
   return (
     <>
-      {/* Lead story fades in first */}
       <div style={{ animation: 'articleFadeIn 400ms ease-out both' }}>
         <LeadStory article={lead} onClick={() => onArticleClick(lead)} />
       </div>
@@ -210,18 +203,26 @@ function FeedView({ articles, loading, error, onArticleClick }) {
           </div>
         </section>
       )}
+
+      {hasMore && (
+        <div className="flex justify-center py-10">
+          <button
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="label-caps text-muted hover:text-ink transition-colors duration-150 px-6 py-2 border border-rule"
+            style={{ letterSpacing: '0.1em', fontSize: '0.7rem' }}
+          >
+            {loadingMore ? 'Loading…' : 'More stories'}
+          </button>
+        </div>
+      )}
     </>
   )
 }
 
-// FeedSkeleton renders placeholder blocks that match the feed's rough layout.
-// This prevents the jarring "blank → everything at once" pop that plain text
-// loading states cause. The pulse animation signals "content is loading"
-// without being distracting.
 function FeedSkeleton() {
   return (
     <div style={{ animation: 'articleFadeIn 300ms ease-out both' }}>
-      {/* Lead story skeleton */}
       <div className="pb-8 border-b border-rule">
         <div style={{ ...skeletonStyle, width: '5rem', height: '0.6rem', marginBottom: '0.75rem' }} />
         <div style={{ ...skeletonStyle, width: '75%', height: '2.5rem', marginBottom: '0.5rem' }} />
@@ -232,7 +233,6 @@ function FeedSkeleton() {
         <div style={{ ...skeletonStyle, width: '80%', height: '1rem' }} />
       </div>
 
-      {/* Grid skeleton */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 mt-0 border-t border-rule">
         {Array.from({ length: 6 }).map((_, i) => (
           <div key={i} style={{ padding: '1.5rem', borderBottom: '1px solid var(--color-rule)' }}>
@@ -247,8 +247,6 @@ function FeedSkeleton() {
   )
 }
 
-// Shared style for skeleton placeholder blocks.
-// The pulse animation is defined in index.css.
 const skeletonStyle = {
   background: 'var(--color-rule)',
   animation: 'pulse 1.6s ease-in-out infinite',

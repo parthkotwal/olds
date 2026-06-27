@@ -1,32 +1,43 @@
-// Base URL for the Go backend API.
-// In Docker: set VITE_API_BASE_URL=http://localhost:8080 in docker-compose.yml.
-// Locally (npm run dev): defaults to localhost:8080 which is where the backend runs.
-//
-// import.meta.env is Vite's way to access environment variables at build time.
-// Variables must be prefixed with VITE_ to be exposed to the browser bundle —
-// unprefixed variables are server-side only and will be undefined here.
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'
 
 /**
- * Fetch articles from the backend, optionally filtered by category.
+ * Fetch a page of articles from the backend.
  *
- * @param {string} category - NewsAPI category slug (e.g. "business"). Pass ""
- *   or omit to fetch all categories.
- * @returns {Promise<Article[]>} - Array of article objects from the Go backend.
+ * @param {Object} options
+ * @param {string} options.category - Category filter (empty string for all).
+ * @param {number} options.page - 1-indexed page number.
+ * @param {number} options.pageSize - Articles per page.
+ * @returns {Promise<{ articles: Article[], total: number, page: number }>}
  */
-export async function fetchArticles(category = '') {
-  const url = category
-    ? `${API_BASE}/articles?category=${encodeURIComponent(category)}`
-    : `${API_BASE}/articles`
+export async function fetchArticles({ category = '', page = 1, pageSize = 30 } = {}) {
+  const params = new URLSearchParams()
+  if (category) params.set('category', category)
+  params.set('page', String(page))
+  params.set('page_size', String(pageSize))
 
-  const response = await fetch(url)
+  const response = await fetch(`${API_BASE}/articles?${params}`)
 
   if (!response.ok) {
     throw new Error(`Backend returned ${response.status} ${response.statusText}`)
   }
 
   const data = await response.json()
-  // The Go backend wraps articles in { articles: [...], count: N }.
-  // Guard against null (empty store returns null in Go — see handler nil check).
-  return data.articles ?? []
+  return {
+    articles: data.articles ?? [],
+    total: data.total ?? 0,
+    page: data.page ?? 1,
+  }
+}
+
+/**
+ * Fetch a single article with full detail (raw_text, entities).
+ */
+export async function fetchArticleById(id) {
+  const response = await fetch(`${API_BASE}/articles/${encodeURIComponent(id)}`)
+
+  if (!response.ok) {
+    throw new Error(`Backend returned ${response.status} ${response.statusText}`)
+  }
+
+  return response.json()
 }

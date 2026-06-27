@@ -148,20 +148,21 @@ func (h *ArticleHandler) enrichWithExplanations(source article.Article, connecti
 	for i, conn := range connections {
 		wg.Add(1)
 
-		// Capture i and conn as function parameters to avoid the loop variable
-		// capture gotcha. Each goroutine gets its own copy of i and conn.
 		go func(idx int, c Connection) {
 			defer wg.Done()
 
-			// Cache hit — skip the API call entirely.
 			if exp, ok := h.explanationCache.Get(source.ID, c.Article.ID); ok {
 				connections[idx].Explanation = exp
 				return
 			}
 
-			// Compute the shared entity set for the prompt.
-			// graph.SharedEntities is a pure function — safe to call concurrently.
-			shared := graph.SharedEntities(source, c.Article)
+			// Look up the full article from the store for entity comparison.
+			fullNeighbour, ok := h.store.GetByID(c.Article.ID)
+			if !ok {
+				return
+			}
+
+			shared := graph.SharedEntities(source, fullNeighbour)
 
 			exp, err := h.llmClient.Explain(
 				source.Title, source.Description, source.Category,
@@ -170,12 +171,11 @@ func (h *ArticleHandler) enrichWithExplanations(source article.Article, connecti
 			)
 			if err != nil {
 				log.Printf("llm: explain failed for %s↔%s: %v", source.ID, c.Article.ID, err)
-				return // leave Explanation empty — connection still shows without it
+				return
 			}
 
 			h.explanationCache.Set(source.ID, c.Article.ID, exp)
 			connections[idx].Explanation = exp
-			log.Printf("llm: explanation set for %s↔%s: %q", source.ID, c.Article.ID, exp)
 		}(i, conn)
 	}
 
@@ -183,13 +183,89 @@ func (h *ArticleHandler) enrichWithExplanations(source article.Article, connecti
 	return connections
 }
 
+// ArticleSummary is the slim JSON shape sent to the frontend for feed listings
+// and connection sidebar entries. It omits raw_text, entities, and embedding
+// which are only needed internally by the graph and ML pipeline.
+type ArticleSummary struct {
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	URL         string    `json:"url"`
+	Source      string    `json:"source"`
+	Category    string    `json:"category"`
+	PublishedAt time.Time `json:"published_at"`
+	ImageURL    string    `json:"image_url,omitempty"`
+}
+
+func toSummary(a article.Article) ArticleSummary {
+	return ArticleSummary{
+		ID:          a.ID,
+		Title:       a.Title,
+		Description: a.Description,
+		URL:         a.URL,
+		Source:      a.Source,
+		Category:    a.Category,
+		PublishedAt: a.PublishedAt,
+		ImageURL:    a.ImageURL,
+	}
+}
+
+func toSummaries(articles []article.Article) []ArticleSummary {
+	out := make([]ArticleSummary, len(articles))
+	for i, a := range articles {
+		out[i] = toSummary(a)
+	}
+	return out
+}
+
+// ArticleDetail is the full article shape returned by GET /articles/:id.
+// Includes raw_text and entities for the reading view, but still omits
+// the embedding vector which is only needed internally.
+type ArticleDetail struct {
+	ID          string           `json:"id"`
+	Title       string           `json:"title"`
+	Description string           `json:"description"`
+	URL         string           `json:"url"`
+	Source      string           `json:"source"`
+	Category    string           `json:"category"`
+	PublishedAt time.Time        `json:"published_at"`
+	ImageURL    string           `json:"image_url,omitempty"`
+	RawText     string           `json:"raw_text,omitempty"`
+	Entities    []article.Entity `json:"entities,omitempty"`
+}
+
+func toDetail(a article.Article) ArticleDetail {
+	return ArticleDetail{
+		ID:          a.ID,
+		Title:       a.Title,
+		Description: a.Description,
+		URL:         a.URL,
+		Source:      a.Source,
+		Category:    a.Category,
+		PublishedAt: a.PublishedAt,
+		ImageURL:    a.ImageURL,
+		RawText:     a.RawText,
+		Entities:    a.Entities,
+	}
+}
+
+// GetByID handles GET /articles/:id — returns a single article with full detail.
+func (h *ArticleHandler) GetByID(c *gin.Context) {
+	id := c.Param("id")
+	a, ok := h.store.GetByID(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "article not found", "id": id})
+		return
+	}
+	c.JSON(http.StatusOK, toDetail(a))
+}
+
+const defaultPageSize = 30
+
 // List handles GET /articles.
-// Optionally filters by the ?category= query parameter.
-// Articles are re-ranked by the behavior store before being returned —
-// categories and entities the user engages with rise to the top.
+// Supports pagination via ?page= (1-indexed, default 1) and ?page_size= (default 30).
+// Optionally filters by ?category=.
 func (h *ArticleHandler) List(c *gin.Context) {
-	// c.Query reads a URL query parameter by name.
-	// Returns "" if the parameter is absent — no error needed, absence means "all".
 	category := c.Query("category")
 
 	var articles []article.Article
@@ -199,21 +275,33 @@ func (h *ArticleHandler) List(c *gin.Context) {
 		articles = h.store.GetAll()
 	}
 
-	// Guard against nil slice → JSON null.
-	// The store returns nil when a category matches nothing. We always want
-	// to return [] so the frontend gets a consistent type, never null.
 	if articles == nil {
 		articles = []article.Article{}
 	}
 
-	// Re-rank using implicit behavior signals.
-	// ScoreAndSort is a no-op in terms of content — it only reorders.
-	// When no signals have been recorded yet, all articles score 1.0
-	// and the original ingestion order (recency) is preserved.
 	articles = h.behaviorStore.ScoreAndSort(articles)
 
+	total := len(articles)
+	page := parseIntQuery(c, "page", 1)
+	pageSize := parseIntQuery(c, "page_size", defaultPageSize)
+	if page < 1 {
+		page = 1
+	}
+
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"articles": articles,
-		"count":    len(articles),
+		"articles":  toSummaries(articles[start:end]),
+		"count":     end - start,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
 	})
 }

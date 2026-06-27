@@ -201,6 +201,7 @@ func main() {
 	// (which are keyed to a user identity) requires a verified JWT.
 	r.GET("/health", handler.Health)
 	r.GET("/articles", articleHandler.List)
+	r.GET("/articles/:id", articleHandler.GetByID)
 	r.GET("/articles/:id/connections", articleHandler.Connections)
 	r.GET("/ws/connections/:id", articleHandler.WSConnections)
 	r.POST("/ingest", articleHandler.Ingest)
