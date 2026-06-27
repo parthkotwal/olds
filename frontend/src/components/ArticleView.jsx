@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import ConnectionSidebar from './ConnectionSidebar'
+import ConnectionGraphView from './ConnectionGraphView'
 import { useBehaviorTracking } from '../hooks/useBehaviorTracking'
 import { fetchArticleById } from '../api/articles.js'
 
@@ -13,6 +14,7 @@ function formatDate(dateStr) {
 
 export default function ArticleView({ article, token, onBack, onArticleClick }) {
   const [fullArticle, setFullArticle] = useState(null)
+  const [showGraph, setShowGraph] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -25,6 +27,16 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
   const display = fullArticle ?? article
 
   useBehaviorTracking(display, token)
+
+  if (showGraph) {
+    return (
+      <ConnectionGraphView
+        article={display}
+        onBack={() => setShowGraph(false)}
+        onArticleClick={onArticleClick}
+      />
+    )
+  }
 
   return (
     <div>
@@ -70,6 +82,14 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
                 </a>
               </>
             )}
+            <span className="text-muted text-xs">·</span>
+            <button
+              onClick={() => setShowGraph(true)}
+              className="label-caps text-ink hover:underline"
+              style={{ fontSize: '0.65rem', textDecorationColor: 'var(--color-accent)', textUnderlineOffset: '3px' }}
+            >
+              Graph
+            </button>
           </div>
 
           {display.image_url && (
@@ -132,6 +152,7 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
           <ConnectionSidebar
             articleId={article.id}
             onArticleClick={onArticleClick}
+            onOpenGraph={() => setShowGraph(true)}
           />
         </aside>
 
@@ -139,6 +160,7 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
           <ConnectionSidebar
             articleId={article.id}
             onArticleClick={onArticleClick}
+            onOpenGraph={() => setShowGraph(true)}
           />
         </div>
       </div>

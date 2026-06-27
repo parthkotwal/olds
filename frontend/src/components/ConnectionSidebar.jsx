@@ -107,9 +107,10 @@ function ConnectionEntry({ connection, onArticleClick }) {
       {breakdown && (
         <details className="mt-2 group/why">
           <summary
-            className="label-caps text-muted cursor-pointer hover:text-ink transition-colors"
+            className="label-caps text-ink cursor-pointer hover:opacity-80 transition-opacity inline-flex items-center gap-1 border border-rule bg-warm px-1.5 py-1"
             style={{ fontSize: '0.55rem', listStyle: 'none' }}
           >
+            <span aria-hidden="true" className="group-open/why:rotate-90 transition-transform duration-150">›</span>
             Why connected
           </summary>
           <div className="mt-2 pt-2 border-t border-rule">
@@ -183,7 +184,7 @@ function ConnectionEntry({ connection, onArticleClick }) {
  *   onArticleClick fn      — called when a connection headline is clicked
  *   className     string   — optional extra classes for positioning
  */
-export default function ConnectionSidebar({ articleId, onArticleClick, className = '' }) {
+export default function ConnectionSidebar({ articleId, onArticleClick, onOpenGraph, className = '' }) {
   const { connections, loading, error } = useConnections(articleId)
 
   const crossTopicConnections = connections.filter(c => c.cross_topic)
@@ -192,8 +193,19 @@ export default function ConnectionSidebar({ articleId, onArticleClick, className
   return (
     <div className={className}>
       {/* Section header — label-caps, matches entity tags style */}
-      <div className="label-caps text-muted mb-4" style={{ fontSize: '0.65rem', letterSpacing: '0.12em' }}>
-        Connections
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="label-caps text-muted" style={{ fontSize: '0.65rem', letterSpacing: '0.12em' }}>
+          Connections
+        </div>
+        {onOpenGraph && (
+          <button
+            onClick={onOpenGraph}
+            className="label-caps text-ink border border-rule bg-warm px-2 py-1 hover:bg-accent transition-colors"
+            style={{ fontSize: '0.52rem' }}
+          >
+            View graph
+          </button>
+        )}
       </div>
 
       {/* ── Loading state ───────────────────────────────────────────────── */}
