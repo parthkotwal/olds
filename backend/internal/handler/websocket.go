@@ -145,6 +145,11 @@ func (h *ArticleHandler) WSConnections(c *gin.Context) {
 		}
 	}
 
+	if err := conn.WriteJSON(WSMessage{Type: "explanations_done", Data: gin.H{"article_id": id}}); err != nil {
+		log.Printf("ws: explanations_done write failed for article %s: %v", id, err)
+		return
+	}
+
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
 			log.Printf("ws: client disconnected from article %s", id)
