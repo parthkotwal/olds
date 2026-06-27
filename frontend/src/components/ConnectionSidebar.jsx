@@ -48,9 +48,9 @@ function ConnectionEntry({ connection, onArticleClick }) {
             className="label-caps"
             style={{
               fontSize: '0.55rem',
-              color: 'var(--color-accent)',
-              border: '1px solid var(--color-accent)',
-              padding: '0 3px',
+              color: 'var(--color-ink)',
+              background: 'var(--color-accent)',
+              padding: '1px 4px',
               letterSpacing: '0.05em',
             }}
           >
@@ -63,8 +63,9 @@ function ConnectionEntry({ connection, onArticleClick }) {
       <p
         className="font-display text-ink leading-snug group-hover:opacity-70 transition-opacity duration-150"
         style={{
-          fontSize: '0.8rem',
-          fontWeight: 600,
+          fontSize: '0.86rem',
+          fontWeight: 400,
+          letterSpacing: '-0.02em',
           display: '-webkit-box',
           WebkitLineClamp: 3,
           WebkitBoxOrient: 'vertical',
@@ -202,7 +203,7 @@ export default function ConnectionSidebar({ articleId, onArticleClick, className
             className="label-caps"
             style={{
               fontSize: '0.55rem',
-              color: 'var(--color-accent)',
+              color: 'var(--color-ink)',
               letterSpacing: '0.1em',
               marginBottom: '0.75rem',
             }}

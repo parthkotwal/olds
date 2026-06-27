@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from './lib/supabase'
 import Header from './components/Header.jsx'
 import CategoryFilter from './components/CategoryFilter.jsx'
-import LeadStory from './components/LeadStory.jsx'
-import ArticleCard from './components/ArticleCard.jsx'
+import HeroSection from './components/LeadStory.jsx'
+import { ArticleCardHorizontal, ArticleCardDense } from './components/ArticleCard.jsx'
 import ArticleView from './components/ArticleView.jsx'
 import LoginModal from './components/LoginModal.jsx'
 import { fetchArticles } from './api/articles.js'
@@ -56,7 +56,6 @@ export default function App() {
     await supabase.auth.signOut()
   }
 
-  // Initial load and category change
   useEffect(() => {
     let cancelled = false
 
@@ -130,7 +129,7 @@ export default function App() {
       />
       <CategoryFilter selected={selectedCategory} onSelect={handleCategorySelect} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      <main className="max-w-layout mx-auto px-5 sm:px-8 py-8">
         {selectedArticle ? (
           <ArticleView
             article={selectedArticle}
@@ -162,46 +161,68 @@ export default function App() {
 }
 
 function FeedView({ articles, loading, loadingMore, hasMore, error, onArticleClick, onLoadMore }) {
-  if (loading) {
-    return <FeedSkeleton />
-  }
+  if (loading) return <FeedSkeleton />
 
   if (error) {
     return (
       <p className="text-muted text-sm py-12">
-        Could not load articles — {error}. Make sure the backend is running and POST /ingest has been called.
+        Could not load articles — {error}
       </p>
     )
   }
 
   if (articles.length === 0) {
     return (
-      <p className="text-muted text-sm py-12" style={{ fontStyle: 'italic' }}>
-        No articles yet — the feed is loading. Check back in a moment.
+      <p className="text-muted text-sm py-12 italic">
+        No articles yet. Check back in a moment.
       </p>
     )
   }
 
-  const [lead, ...rest] = articles
+  const heroArticles = articles.slice(0, 3)
+  const midSection = articles.slice(3, 9)
+  const denseSection = articles.slice(9)
 
   return (
-    <>
-      <div style={{ animation: 'articleFadeIn 400ms ease-out both' }}>
-        <LeadStory article={lead} onClick={() => onArticleClick(lead)} />
-      </div>
+    <div style={{ animation: 'fadeIn 300ms ease-out both' }}>
+      <HeroSection articles={heroArticles} onArticleClick={onArticleClick} />
 
-      {rest.length > 0 && (
-        <section className="mt-0 border-t border-rule">
-          <div className="article-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-            {rest.map((article) => (
-              <ArticleCard
-                key={article.id}
-                article={article}
-                onClick={() => onArticleClick(article)}
-              />
+      {midSection.length > 0 && (
+        <>
+          <div className="border-t border-rule my-7" />
+          <div className="editorial-label text-ink mb-4">
+            More Stories
+          </div>
+          <div className="editorial-grid-2 grid grid-cols-1 md:grid-cols-2 gap-x-0">
+            {midSection.map(article => (
+              <div key={article.id}>
+                <ArticleCardHorizontal
+                  article={article}
+                  onClick={() => onArticleClick(article)}
+                />
+              </div>
             ))}
           </div>
-        </section>
+        </>
+      )}
+
+      {denseSection.length > 0 && (
+        <>
+          <div className="border-t border-rule my-7" />
+          <div className="editorial-label text-ink mb-4">
+            Latest
+          </div>
+          <div className="editorial-grid-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-0">
+            {denseSection.map(article => (
+              <div key={article.id}>
+                <ArticleCardDense
+                  article={article}
+                  onClick={() => onArticleClick(article)}
+                />
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {hasMore && (
@@ -209,37 +230,48 @@ function FeedView({ articles, loading, loadingMore, hasMore, error, onArticleCli
           <button
             onClick={onLoadMore}
             disabled={loadingMore}
-            className="label-caps text-muted hover:text-ink transition-colors duration-150 px-6 py-2 border border-rule"
-            style={{ letterSpacing: '0.1em', fontSize: '0.7rem' }}
+            className="label-caps text-ink bg-accent transition-opacity duration-150 hover:opacity-80 px-6 py-2"
+            style={{ fontSize: '0.65rem' }}
           >
             {loadingMore ? 'Loading…' : 'More stories'}
           </button>
         </div>
       )}
-    </>
+    </div>
   )
 }
 
 function FeedSkeleton() {
   return (
-    <div style={{ animation: 'articleFadeIn 300ms ease-out both' }}>
-      <div className="pb-8 border-b border-rule">
-        <div style={{ ...skeletonStyle, width: '5rem', height: '0.6rem', marginBottom: '0.75rem' }} />
-        <div style={{ ...skeletonStyle, width: '75%', height: '2.5rem', marginBottom: '0.5rem' }} />
-        <div style={{ ...skeletonStyle, width: '55%', height: '2.5rem', marginBottom: '1rem' }} />
-        <div style={{ ...skeletonStyle, width: '10rem', height: '0.6rem', marginBottom: '1.5rem' }} />
-        <div style={{ ...skeletonStyle, width: '100%', maxWidth: '32rem', height: '12rem', marginBottom: '1.5rem' }} />
-        <div style={{ ...skeletonStyle, width: '90%', height: '1rem', marginBottom: '0.5rem' }} />
-        <div style={{ ...skeletonStyle, width: '80%', height: '1rem' }} />
+    <div style={{ animation: 'fadeIn 300ms ease-out both' }}>
+      <div className="flex flex-col lg:flex-row gap-8 pb-6">
+        <div className="lg:flex-[3]">
+          <div style={{ ...skel, width: '100%', height: '16rem', marginBottom: '1rem' }} />
+          <div style={{ ...skel, width: '4rem', height: '0.5rem', marginBottom: '0.75rem' }} />
+          <div style={{ ...skel, width: '80%', height: '1.5rem', marginBottom: '0.5rem' }} />
+          <div style={{ ...skel, width: '60%', height: '1.5rem', marginBottom: '1rem' }} />
+          <div style={{ ...skel, width: '90%', height: '0.75rem', marginBottom: '0.4rem' }} />
+          <div style={{ ...skel, width: '75%', height: '0.75rem' }} />
+        </div>
+        <div className="lg:flex-[2]">
+          {[0, 1].map(i => (
+            <div key={i} className="py-5 border-b border-rule">
+              <div style={{ ...skel, width: '3rem', height: '0.5rem', marginBottom: '0.5rem' }} />
+              <div style={{ ...skel, width: '90%', height: '0.875rem', marginBottom: '0.4rem' }} />
+              <div style={{ ...skel, width: '70%', height: '0.875rem', marginBottom: '0.5rem' }} />
+              <div style={{ ...skel, width: '6rem', height: '0.5rem' }} />
+            </div>
+          ))}
+        </div>
       </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 mt-0 border-t border-rule">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} style={{ padding: '1.5rem', borderBottom: '1px solid var(--color-rule)' }}>
-            <div style={{ ...skeletonStyle, width: '4rem', height: '0.55rem', marginBottom: '0.75rem' }} />
-            <div style={{ ...skeletonStyle, width: '90%', height: '1rem', marginBottom: '0.4rem' }} />
-            <div style={{ ...skeletonStyle, width: '70%', height: '1rem', marginBottom: '0.75rem' }} />
-            <div style={{ ...skeletonStyle, width: '8rem', height: '0.55rem' }} />
+      <div className="border-t border-rule my-6" />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="py-4 border-b border-rule">
+            <div style={{ ...skel, width: '3rem', height: '0.45rem', marginBottom: '0.5rem' }} />
+            <div style={{ ...skel, width: '85%', height: '0.8rem', marginBottom: '0.35rem' }} />
+            <div style={{ ...skel, width: '65%', height: '0.8rem', marginBottom: '0.5rem' }} />
+            <div style={{ ...skel, width: '5rem', height: '0.45rem' }} />
           </div>
         ))}
       </div>
@@ -247,7 +279,7 @@ function FeedSkeleton() {
   )
 }
 
-const skeletonStyle = {
+const skel = {
   background: 'var(--color-rule)',
   animation: 'pulse 1.6s ease-in-out infinite',
 }

@@ -7,20 +7,23 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        // "display" → use as `font-display` in className
         display: ['"Playfair Display"', 'Georgia', 'serif'],
-        // Override the default sans stack to use Inter
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
       },
       colors: {
-        paper: '#FAF8F5',   // warm off-white — aged newsprint
-        ink:   '#1A1A1A',   // near-black
-        muted: '#8A8A8A',   // secondary text, dividers
-        accent:'#C0392B',   // ink-red — hover, active category, live indicators
-        rule:  '#D4D0C8',   // thin column rules and border lines
+        paper:  '#FDFCF3',
+        surface:'#FFFFFF',
+        warm:   '#FDFBE4',
+        ink:    '#000000',
+        charcoal:'#211D1C',
+        muted:  '#6E6E6E',
+        faint:  '#B3B3B3',
+        accent: '#FFC500',
+        rule:   '#D9D9D9',
       },
       maxWidth: {
-        article: '42.5rem', // ~680px — comfortable single-column reading width
+        article: '42.5rem',
+        layout:  '76rem',
       },
     },
   },

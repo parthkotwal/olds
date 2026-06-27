@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 
 function GoogleIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden="true">
       <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" />
       <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" />
       <path fill="#FBBC05" d="M3.964 10.707A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.707V4.961H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.039l3.007-2.332z" />
@@ -12,19 +12,6 @@ function GoogleIcon() {
   )
 }
 
-/**
- * LoginModal appears when an unauthenticated user clicks an article.
- *
- * Design intent: it should feel like a moment in the newspaper — an insert
- * that arrives when you try to go deeper. Not a blocker, not a hard wall.
- * Dismissible (Escape key or click outside the panel).
- *
- * After a successful sign-in, App.jsx's onAuthStateChange handler fires,
- * sets the session, and opens the pending article — this component unmounts.
- *
- * Props:
- *   onClose  fn  — called when the modal should be dismissed
- */
 export default function LoginModal({ onClose }) {
   const [email, setEmail] = useState('')
   const [emailSent, setEmailSent] = useState(false)
@@ -32,7 +19,6 @@ export default function LoginModal({ onClose }) {
   const [error, setError] = useState(null)
   const overlayRef = useRef(null)
 
-  // Close on Escape key — expected behaviour for any modal.
   useEffect(() => {
     function onKeyDown(e) {
       if (e.key === 'Escape') onClose()
@@ -41,15 +27,12 @@ export default function LoginModal({ onClose }) {
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
-  // Prevent body scroll while the modal is open.
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = prev }
   }, [])
 
-  // Click-outside: only close if the click landed on the overlay itself,
-  // not on the modal panel (which is a child of the overlay).
   function handleOverlayClick(e) {
     if (e.target === overlayRef.current) onClose()
   }
@@ -82,204 +65,90 @@ export default function LoginModal({ onClose }) {
   }
 
   return (
-    // ── Overlay ─────────────────────────────────────────────────────────────
     <div
       ref={overlayRef}
       onClick={handleOverlayClick}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 50,
-        backgroundColor: 'rgba(26, 26, 26, 0.60)',
-        backdropFilter: 'blur(2px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '1.5rem',
-      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-6"
+      style={{ backgroundColor: 'rgba(0, 0, 0, 0.48)', backdropFilter: 'blur(2px)' }}
     >
-      {/* ── Modal panel ───────────────────────────────────────────────────── */}
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Sign in to read"
+        aria-label="Sign in"
+        className="bg-paper w-full relative border border-rule"
         style={{
-          backgroundColor: 'var(--color-paper)',
-          borderTop: '3px solid var(--color-ink)',
-          width: '100%',
-          maxWidth: '23rem',
-          padding: '2rem',
-          position: 'relative',
+          maxWidth: '22rem',
+          padding: '2rem 1.75rem',
+          borderTop: '2px solid var(--color-ink)',
           animation: 'modalSlideIn 200ms ease-out both',
         }}
       >
-        {/* Dismiss button */}
         <button
           onClick={onClose}
           aria-label="Close"
-          style={{
-            position: 'absolute',
-            top: '1rem',
-            right: '1rem',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--color-muted)',
-            fontSize: '1.25rem',
-            lineHeight: 1,
-            padding: '0.25rem',
-            transition: 'color 150ms',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-ink)' }}
-          onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-muted)' }}
+          className="absolute text-muted hover:text-ink transition-colors"
+          style={{ top: '0.75rem', right: '0.75rem', background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.1rem' }}
         >
           ×
         </button>
 
-        {/* Header */}
-        <p
-          className="label-caps text-muted text-center"
-          style={{ marginBottom: '0.375rem', fontSize: '0.6rem' }}
-        >
-          Olds
+        <h2 className="font-display font-normal text-ink text-2xl headline-tight mb-1">Sign in to read</h2>
+        <p className="text-muted text-xs mb-6 leading-relaxed">
+          Your feed adapts to how you read.
         </p>
-        <p
-          className="font-display font-black text-ink text-center"
-          style={{ fontSize: '1.25rem', marginBottom: '0.25rem' }}
-        >
-          Sign in to read
-        </p>
-        <p
-          className="text-muted text-center"
-          style={{ fontSize: '0.75rem', marginBottom: '1.75rem', lineHeight: 1.5 }}
-        >
-          Cross-topic connections, personalized to you.
-        </p>
-
-        <div style={{ borderTop: '1px solid var(--color-rule)', marginBottom: '1.75rem' }} />
 
         {emailSent ? (
-          // ── Confirmation ────────────────────────────────────────────────
-          <div style={{ textAlign: 'center' }}>
-            <p
-              className="font-display font-bold text-ink"
-              style={{ fontSize: '1rem', marginBottom: '0.5rem' }}
-            >
-              Check your inbox
-            </p>
-            <p className="text-muted" style={{ fontSize: '0.75rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
-              We sent a link to{' '}
-              <span style={{ color: 'var(--color-ink)', fontWeight: 500 }}>{email}</span>.
-              Click it to continue — no password needed.
+          <div>
+            <p className="font-display font-bold text-ink mb-2">Check your inbox</p>
+            <p className="text-muted text-xs leading-relaxed mb-4">
+              We sent a link to <span className="text-ink font-medium">{email}</span>.
             </p>
             <button
               onClick={() => { setEmailSent(false); setEmail('') }}
-              className="label-caps text-muted"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', transition: 'color 150ms' }}
-              onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-ink)' }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-muted)' }}
+                className="label-caps text-muted hover:text-ink transition-colors"
+              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
             >
               ← Different email
             </button>
           </div>
         ) : (
           <>
-            {/* Google */}
             <button
               onClick={handleGoogleSignIn}
               disabled={loading}
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.625rem',
-                border: '1px solid var(--color-ink)',
-                padding: '0.625rem 1rem',
-                background: 'none',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                opacity: loading ? 0.5 : 1,
-                fontSize: '0.8125rem',
-                fontWeight: 500,
-                color: 'var(--color-ink)',
-                transition: 'background 150ms, color 150ms',
-                marginBottom: '1.25rem',
-              }}
-              onMouseEnter={e => {
-                if (!loading) {
-                  e.currentTarget.style.background = 'var(--color-ink)'
-                  e.currentTarget.style.color = 'var(--color-paper)'
-                }
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = 'none'
-                e.currentTarget.style.color = 'var(--color-ink)'
-              }}
+              className="w-full flex items-center justify-center gap-2.5 border border-ink px-4 py-2.5 text-sm font-medium text-ink hover:bg-ink hover:text-paper transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed mb-5"
             >
               <GoogleIcon />
               Continue with Google
             </button>
 
-            {/* Divider */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
-              <div style={{ flex: 1, borderTop: '1px solid var(--color-rule)' }} />
-              <span className="label-caps text-muted" style={{ fontSize: '0.6rem' }}>or</span>
-              <div style={{ flex: 1, borderTop: '1px solid var(--color-rule)' }} />
+            <div className="flex items-center gap-3 mb-5">
+              <div className="flex-1 border-t border-rule" />
+              <span className="text-muted text-[0.6rem] uppercase tracking-widest">or</span>
+              <div className="flex-1 border-t border-rule" />
             </div>
 
-            {/* Email magic link */}
             <form onSubmit={handleEmailSignIn} noValidate>
-              <label htmlFor="modal-email" className="label-caps text-muted" style={{ display: 'block', marginBottom: '0.375rem', fontSize: '0.6rem' }}>
-                Email address
-              </label>
               <input
-                id="modal-email"
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="you@example.com"
+                placeholder="Email address"
                 required
                 autoComplete="email"
-                style={{
-                  width: '100%',
-                  background: 'transparent',
-                  border: 'none',
-                  borderBottom: '1px solid var(--color-ink)',
-                  padding: '0.375rem 0',
-                  marginBottom: '1rem',
-                  fontSize: '0.875rem',
-                  color: 'var(--color-ink)',
-                  outline: 'none',
-                  boxSizing: 'border-box',
-                }}
+                className="w-full bg-transparent border-b border-ink px-0 py-2 mb-4 text-sm text-ink placeholder:text-muted focus:outline-none focus:border-accent transition-colors"
               />
               <button
                 type="submit"
                 disabled={loading || !email.trim()}
-                style={{
-                  width: '100%',
-                  background: 'var(--color-ink)',
-                  color: 'var(--color-paper)',
-                  border: 'none',
-                  padding: '0.625rem 1rem',
-                  fontSize: '0.8125rem',
-                  fontWeight: 500,
-                  cursor: loading || !email.trim() ? 'not-allowed' : 'pointer',
-                  opacity: loading || !email.trim() ? 0.45 : 1,
-                  transition: 'opacity 150ms',
-                }}
+                className="w-full bg-accent text-ink px-4 py-2.5 text-sm font-bold hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {loading ? 'Sending…' : 'Send magic link'}
               </button>
             </form>
 
             {error && (
-              <p
-                className="text-center"
-                style={{ marginTop: '0.875rem', fontSize: '0.75rem', color: 'var(--color-accent)' }}
-              >
-                {error}
-              </p>
+              <p className="mt-3 bg-warm border border-rule px-3 py-2 text-xs text-ink text-center">{error}</p>
             )}
           </>
         )}

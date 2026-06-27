@@ -1,76 +1,110 @@
-// formatDate converts an ISO 8601 date string to "March 19, 2026"
-function formatDate(dateStr) {
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
+function relativeAge(dateStr) {
+  if (!dateStr) return ''
+  const hours = (Date.now() - new Date(dateStr).getTime()) / 3600000
+  if (hours < 1) return 'Just now'
+  if (hours < 24) return `${Math.floor(hours)}h ago`
+  if (hours < 48) return 'Yesterday'
+  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-// LeadStory renders the dominant front-page article — full width, large headline.
-//
-// This is the first article in the feed. Its headline is 3–4× larger than the
-// article grid below, establishing clear visual hierarchy. In newspaper terms,
-// it's the "above the fold" lead story.
-//
-// Props:
-//   article  Article  — the lead article object from the Go backend
-//   onClick  fn       — called when the user clicks the headline or "Read more"
-export default function LeadStory({ article, onClick }) {
+export default function HeroSection({ articles, onArticleClick }) {
+  if (!articles || articles.length === 0) return null
+
+  const lead = articles[0]
+  const sides = articles.slice(1, 3)
+
   return (
-    <div className="pb-8 border-b border-rule">
-      {/* Category label — small-caps, accent-colored dot prefix */}
-      <div className="label-caps text-muted mb-3">
-        <span className="text-accent mr-1.5">●</span>
-        {article.category}
-      </div>
+    <section className="pb-6 mb-2">
+      <div className="flex flex-col lg:flex-row gap-0">
+        <div className="lg:flex-[3] lg:pr-8 lg:border-r lg:border-rule pb-6 lg:pb-0">
+          {lead.image_url && (
+            <div
+              className="mb-4 overflow-hidden"
+              style={{ aspectRatio: '3/2', background: 'var(--color-rule)' }}
+            >
+              <img
+                src={lead.image_url}
+                alt=""
+                fetchPriority="high"
+                className="w-full h-full object-cover"
+              />
+            </div>
+          )}
+          <div className="editorial-label text-ink mb-2">
+            {lead.category}
+          </div>
+          <h2
+            className="font-display font-normal text-ink leading-tight headline-link headline-tight mb-3"
+            style={{ fontSize: 'clamp(1.9rem, 4vw, 2.85rem)' }}
+            onClick={() => onArticleClick(lead)}
+          >
+            {lead.title}
+          </h2>
+          {lead.description && (
+            <p className="font-display text-muted text-base leading-relaxed mb-3 max-w-xl">
+              {lead.description}
+            </p>
+          )}
+          <div className="label-caps text-faint" style={{ fontSize: '0.6rem' }}>
+            {lead.source} · {relativeAge(lead.published_at)}
+          </div>
+        </div>
 
-      {/* Dominant headline — the largest type on the page */}
-      <h2
-        className="font-display font-black text-ink leading-tight headline-link mb-4"
-        style={{ fontSize: 'clamp(2rem, 5vw, 3.75rem)' }}
-        onClick={onClick}
-      >
-        {article.title}
-      </h2>
-
-      {/* Dateline: Source · Date — the classic newspaper attribution line */}
-      <div className="label-caps text-muted mb-5">
-        {article.source}
-        {article.published_at && (
-          <> · {formatDate(article.published_at)}</>
+        {sides.length > 0 && (
+          <div className="lg:flex-[2] lg:pl-8 flex flex-col">
+            {sides.map((article, i) => (
+              <div
+                key={article.id}
+                className={`py-5 ${i < sides.length - 1 ? 'border-b border-rule' : ''} ${i === 0 ? 'lg:pt-0' : ''}`}
+              >
+                <div className="flex gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="editorial-label text-ink mb-1.5">
+                      {article.category}
+                    </div>
+                    <h3
+                      className="font-display font-normal text-ink leading-snug headline-link headline-tight mb-2"
+                      style={{ fontSize: 'clamp(1rem, 1.8vw, 1.25rem)' }}
+                      onClick={() => onArticleClick(article)}
+                    >
+                      {article.title}
+                    </h3>
+                    {article.description && (
+                      <p
+                        className="font-display text-muted text-sm leading-relaxed mb-2"
+                        style={{
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        {article.description}
+                      </p>
+                    )}
+                    <div className="label-caps text-faint" style={{ fontSize: '0.55rem' }}>
+                      {article.source} · {relativeAge(article.published_at)}
+                    </div>
+                  </div>
+                  {article.image_url && (
+                    <div
+                      className="flex-shrink-0 w-28 h-20 overflow-hidden"
+                      style={{ background: 'var(--color-rule)' }}
+                    >
+                      <img
+                        src={article.image_url}
+                        alt=""
+                        loading="lazy"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
-
-      {/* Lead image — fetchpriority="high" tells the browser this is the LCP
-          element and to start downloading it as early as possible.
-          The aspect-ratio container reserves space so the headline and dateline
-          above don't jump when the image loads. */}
-      {article.image_url && (
-        <div style={{ aspectRatio: '16/9', overflow: 'hidden', marginBottom: '1.5rem', background: 'var(--color-rule)', maxWidth: '42rem', margin: '0 auto 1.5rem' }}>
-          <img
-            src={article.image_url}
-            alt={article.title}
-            fetchPriority="high"
-            loading="eager"
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-        </div>
-      )}
-
-      {/* Deck copy — the lede beneath the headline */}
-      {article.description && (
-        <p className="text-ink text-lg leading-relaxed max-w-3xl mx-auto mb-6 text-center">
-          {article.description}
-        </p>
-      )}
-
-      <button
-        onClick={onClick}
-        className="label-caps text-muted hover:text-accent transition-colors duration-150"
-      >
-        Read more →
-      </button>
-    </div>
+    </section>
   )
 }

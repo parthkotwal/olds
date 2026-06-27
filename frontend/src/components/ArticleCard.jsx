@@ -1,119 +1,91 @@
-/**
- * Returns a human-readable relative age string and a decay tier.
- *
- * tier values:
- *   'fresh'  — < 6h   — full opacity, no badge
- *   'recent' — 6–24h  — full opacity, no badge
- *   'aging'  — 24–48h — slightly muted, no badge
- *   'stale'  — > 48h  — noticeably muted, FADING badge
- */
-function getAgeInfo(dateStr) {
-  if (!dateStr) return { label: '', tier: 'fresh' }
-  const ageMs = Date.now() - new Date(dateStr).getTime()
-  const ageHours = ageMs / (1000 * 60 * 60)
-
-  let label
-  if (ageHours < 1) {
-    label = 'Just now'
-  } else if (ageHours < 24) {
-    label = `${Math.floor(ageHours)}h ago`
-  } else if (ageHours < 48) {
-    label = 'Yesterday'
-  } else {
-    const days = Math.floor(ageHours / 24)
-    label = `${days}d ago`
-  }
-
-  let tier
-  if (ageHours < 6)       tier = 'fresh'
-  else if (ageHours < 24) tier = 'recent'
-  else if (ageHours < 48) tier = 'aging'
-  else                    tier = 'stale'
-
-  return { label, tier }
+function relativeAge(dateStr) {
+  if (!dateStr) return ''
+  const hours = (Date.now() - new Date(dateStr).getTime()) / 3600000
+  if (hours < 1) return 'Just now'
+  if (hours < 24) return `${Math.floor(hours)}h ago`
+  if (hours < 48) return 'Yesterday'
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
 }
 
-// Opacity by decay tier — subtle, never invisible.
-const TIER_OPACITY = { fresh: 1, recent: 1, aging: 0.82, stale: 0.65 }
+function decayOpacity(dateStr) {
+  if (!dateStr) return 1
+  const hours = (Date.now() - new Date(dateStr).getTime()) / 3600000
+  if (hours < 24) return 1
+  if (hours < 48) return 0.85
+  return 0.65
+}
 
-// ArticleCard renders a secondary article in the columnar grid below the lead story.
-//
-// Sizing is deliberately smaller than LeadStory — the type hierarchy guides
-// the eye from the dominant headline down through the grid. Stories are
-// separated by thin column rules (via the .article-grid CSS class on the
-// parent grid) rather than card shadows or background fills.
-//
-// Props:
-//   article  Article  — article object from the Go backend
-//   onClick  fn       — called when the user clicks the headline
-export default function ArticleCard({ article, onClick }) {
-  const { label: ageLabel, tier } = getAgeInfo(article.published_at)
-  const opacity = TIER_OPACITY[tier]
-
+export function ArticleCardHorizontal({ article, onClick }) {
   return (
-    // padding and border-bottom are applied by .article-grid > article in index.css
-    // Column rules (border-right) are added by the nth-child rules there too.
-    // Opacity reflects the backend's decay score — aging articles visually recede.
-    <article style={{ opacity, transition: 'opacity 0.2s' }}>
-      {/* Category label + FADING badge for stale articles */}
-      <div className="label-caps text-muted mb-2.5 flex items-center gap-2">
-        {article.category}
-        {tier === 'stale' && (
-          <span style={{
-            fontSize: '0.6rem',
-            letterSpacing: '0.08em',
-            padding: '1px 5px',
-            border: '1px solid currentColor',
-            opacity: 0.5,
-          }}>
-            FADING
-          </span>
+    <article
+      className="py-4 border-b border-rule cursor-pointer group"
+      style={{ opacity: decayOpacity(article.published_at) }}
+      onClick={onClick}
+    >
+      <div className="flex gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="editorial-label text-ink mb-1">
+            {article.category}
+          </div>
+          <h3
+            className="font-display font-normal text-ink leading-snug headline-tight group-hover:underline mb-1.5"
+            style={{
+              fontSize: '1rem',
+              textDecorationColor: 'var(--color-ink)',
+              textUnderlineOffset: '3px',
+              textDecorationThickness: '1px',
+            }}
+          >
+            {article.title}
+          </h3>
+          <div className="label-caps text-faint" style={{ fontSize: '0.55rem' }}>
+            {article.source} · {relativeAge(article.published_at)}
+          </div>
+        </div>
+        {article.image_url && (
+          <div
+            className="flex-shrink-0 w-24 h-16 sm:w-28 sm:h-[4.5rem] overflow-hidden"
+            style={{ background: 'var(--color-rule)' }}
+          >
+            <img
+              src={article.image_url}
+              alt=""
+              loading="lazy"
+              className="w-full h-full object-cover"
+            />
+          </div>
         )}
       </div>
+    </article>
+  )
+}
 
-      {/* Headline — smaller than lead, but still the dominant element in the card */}
+export function ArticleCardDense({ article, onClick }) {
+  return (
+    <article
+      className="py-3 border-b border-rule cursor-pointer group"
+      style={{ opacity: decayOpacity(article.published_at) }}
+      onClick={onClick}
+    >
       <h3
-        className="font-display font-bold text-ink leading-snug headline-link mb-3"
-        style={{ fontSize: 'clamp(1.1rem, 2vw, 1.375rem)' }}
-        onClick={onClick}
+        className="font-display font-normal text-ink leading-snug headline-tight group-hover:underline mb-1"
+        style={{
+          fontSize: '0.95rem',
+          textDecorationColor: 'var(--color-ink)',
+          textUnderlineOffset: '3px',
+          textDecorationThickness: '1px',
+        }}
       >
         {article.title}
       </h3>
-
-      {/* Dateline — relative age replaces the static date for recency awareness */}
-      <div className="label-caps text-muted mb-3">
-        {article.source}
-        {ageLabel && <> · {ageLabel}</>}
+      <div className="label-caps text-faint" style={{ fontSize: '0.55rem' }}>
+        {article.source} · {relativeAge(article.published_at)}
       </div>
-
-      {/* Thumbnail — aspect-ratio container reserves the exact space before
-          the image downloads, preventing layout shift when it arrives.
-          loading="lazy" skips off-screen images on initial paint. */}
-      {article.image_url && (
-        <div style={{ aspectRatio: '16/9', overflow: 'hidden', marginBottom: '0.75rem', background: 'var(--color-rule)' }}>
-          <img
-            src={article.image_url}
-            alt={article.title}
-            loading="lazy"
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-        </div>
-      )}
-
-      {/* Description — clamped to 3 lines so the grid stays visually even */}
-      {article.description && (
-        <p
-          className="text-ink text-sm leading-relaxed"
-          style={{
-            display: '-webkit-box',
-            WebkitLineClamp: 3,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-          }}
-        >
-          {article.description}
-        </p>
-      )}
     </article>
   )
+}
+
+export default function ArticleCard({ article, onClick }) {
+  return <ArticleCardHorizontal article={article} onClick={onClick} />
 }

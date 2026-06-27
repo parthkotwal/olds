@@ -12,68 +12,79 @@ function formatDate(dateStr) {
 }
 
 export default function ArticleView({ article, token, onBack, onArticleClick }) {
-  // article prop is the slim summary from the feed. Fetch full detail for
-  // raw_text and entities on mount.
   const [fullArticle, setFullArticle] = useState(null)
 
   useEffect(() => {
     let cancelled = false
     fetchArticleById(article.id)
       .then(data => { if (!cancelled) setFullArticle(data) })
-      .catch(() => { /* Fall back to the summary data we already have */ })
+      .catch(() => {})
     return () => { cancelled = true }
   }, [article.id])
 
-  // Use full article data when available, fall back to summary.
   const display = fullArticle ?? article
 
   useBehaviorTracking(display, token)
 
   return (
     <div>
-      <button
-        onClick={onBack}
-        className="label-caps text-muted hover:text-ink transition-colors duration-150 mb-8 inline-block"
-      >
-        ← Back to feed
-      </button>
+      <div className="flex items-center gap-2 mb-6">
+        <button
+          onClick={onBack}
+          className="label-caps text-muted hover:text-ink transition-colors duration-150"
+        >
+          Top Stories
+        </button>
+        <span className="text-muted text-xs">/</span>
+        <span className="label-caps text-muted">{display.category}</span>
+      </div>
 
-      <div className="flex items-start gap-0 lg:gap-12">
+      <div className="flex items-start gap-0 lg:gap-10">
         <article className="flex-1 min-w-0 max-w-article">
-          <div className="label-caps text-accent mb-4">
-            <span className="mr-1.5">●</span>
-            {display.category}
-          </div>
-
           <h1
-            className="font-display font-black text-ink leading-tight mb-6"
-            style={{ fontSize: 'clamp(1.75rem, 4vw, 3rem)' }}
+            className="font-display font-normal text-ink leading-tight headline-tight mb-4"
+            style={{ fontSize: 'clamp(2rem, 4vw, 3rem)' }}
           >
             {display.title}
           </h1>
 
-          <div className="label-caps text-muted mb-6">
-            {display.source}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-6 pb-4 border-b border-rule">
+            <span className="label-caps text-muted" style={{ fontSize: '0.65rem' }}>{display.source}</span>
             {display.published_at && (
-              <> · {formatDate(display.published_at)}</>
+              <>
+                <span className="text-muted text-xs">·</span>
+                <span className="label-caps text-muted" style={{ fontSize: '0.65rem' }}>{formatDate(display.published_at)}</span>
+              </>
+            )}
+            {display.url && (
+              <>
+                <span className="text-muted text-xs">·</span>
+                <a
+                  href={display.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="label-caps text-ink hover:underline"
+                  style={{ fontSize: '0.65rem', textDecorationColor: 'var(--color-accent)', textUnderlineOffset: '3px' }}
+                >
+                  Original
+                </a>
+              </>
             )}
           </div>
 
           {display.image_url && (
-            <div className="mb-7">
+            <div className="mb-8 -mx-5 sm:mx-0 overflow-hidden border-y border-rule" style={{ background: 'var(--color-rule)' }}>
               <img
                 src={display.image_url}
-                alt={display.title}
+                alt=""
                 className="w-full"
-                style={{ maxHeight: '480px', objectFit: 'cover' }}
+                style={{ maxHeight: '420px', objectFit: 'cover' }}
               />
             </div>
           )}
 
-          <div className="border-t border-rule mb-7" />
-
           {(display.raw_text || display.description) ? (
-            <div className="text-ink text-base leading-loose mb-10 space-y-4">
+            <div className="font-display text-ink text-[1.0625rem] leading-[1.72] mb-10 space-y-4">
               {(display.raw_text || display.description)
                 .split('\n')
                 .filter(p => p.trim())
@@ -87,25 +98,17 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
             </p>
           )}
 
-          {display.url && (
-            <a
-              href={display.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="label-caps text-muted hover:text-accent transition-colors duration-150"
-            >
-              Read original →
-            </a>
-          )}
-
           {display.entities && display.entities.length > 0 && (
-            <div className="mt-10 pt-6 border-t border-rule">
-              <div className="label-caps text-muted mb-3">Entities detected</div>
-              <div className="flex flex-wrap gap-2">
+            <div className="pt-5 border-t border-rule">
+              <div className="editorial-label text-ink mb-3">
+                Key entities
+              </div>
+              <div className="flex flex-wrap gap-1.5">
                 {display.entities.map((entity, i) => (
                   <span
                     key={i}
-                    className="label-caps text-muted border border-rule px-2 py-0.5"
+                    className="label-caps text-muted border border-rule px-2 py-1"
+                    style={{ fontSize: '0.58rem' }}
                     title={entity.label}
                   >
                     {entity.text}
@@ -117,11 +120,11 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
         </article>
 
         <aside
-          className="hidden lg:block w-56 flex-shrink-0 pl-8 border-l border-rule sidebar-scroll"
+          className="hidden lg:block w-60 flex-shrink-0 pl-8 border-l border-rule sidebar-scroll"
           style={{
             position: 'sticky',
-            top: '6rem',
-            maxHeight: 'calc(100vh - 7rem)',
+            top: '4rem',
+            maxHeight: 'calc(100vh - 5rem)',
             overflowY: 'auto',
             scrollbarWidth: 'none',
           }}
@@ -132,7 +135,7 @@ export default function ArticleView({ article, token, onBack, onArticleClick }) 
           />
         </aside>
 
-        <div className="lg:hidden mt-10 pt-6 border-t border-rule w-full">
+        <div className="lg:hidden mt-8 pt-6 border-t border-rule w-full">
           <ConnectionSidebar
             articleId={article.id}
             onArticleClick={onArticleClick}
