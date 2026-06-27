@@ -1,6 +1,7 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080').replace(/\/$/, '')
 
 const REQUEST_TIMEOUT_MS = 8000
+const CONNECTIONS_TIMEOUT_MS = 3500
 const LIST_RETRY_DELAYS_MS = [250, 750, 1500, 3000]
 
 function sleep(ms) {
@@ -11,9 +12,9 @@ function isTransientStatus(status) {
   return status === 408 || status === 425 || status === 429 || (status >= 500 && status <= 504)
 }
 
-async function fetchWithTimeout(url, options = {}) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
     return await fetch(url, {
@@ -102,4 +103,24 @@ export async function fetchArticleById(id) {
   return fetchJsonWithRetry(`${API_BASE}/articles/${encodeURIComponent(id)}`, {
     retryDelays: [250, 750, 1500],
   })
+}
+
+export async function fetchConnections(id) {
+  const params = new URLSearchParams({
+    top_n: '10',
+    min_weight: '0.1',
+    explain: 'false',
+  })
+
+  const response = await fetchWithTimeout(
+    `${API_BASE}/articles/${encodeURIComponent(id)}/connections?${params}`,
+    { headers: { Accept: 'application/json' } },
+    CONNECTIONS_TIMEOUT_MS,
+  )
+
+  if (!response.ok) {
+    throw new Error(`Backend returned ${response.status} ${response.statusText}`)
+  }
+
+  return response.json()
 }

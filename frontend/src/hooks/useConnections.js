@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { fetchConnections } from '../api/articles.js'
 
 // Derive the WebSocket base URL from the same VITE_API_BASE_URL env var
 // used by the REST API client. We just swap the protocol:
@@ -10,7 +11,7 @@ import { useState, useEffect } from 'react'
 const WS_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080')
   .replace(/^http/, 'ws')
 
-const RETRY_DELAYS_MS = [0, 2000, 5000, 10000, 15000, 30000]
+const WS_RETRY_DELAYS_MS = [1500, 3500]
 
 /**
  * useConnections opens a WebSocket to /ws/connections/:articleId,
@@ -40,24 +41,33 @@ export function useConnections(articleId) {
     setLoading(true)
     setError(null)
 
-    function connect(attempt = 0) {
+    async function loadInitialConnections() {
       if (cancelled) return
 
-      let receivedInitialMessage = false
+      try {
+        const data = await fetchConnections(articleId)
+        if (cancelled) return
+        setConnections(data.connections ?? [])
+        setError(null)
+        setLoading(false)
+        connectForExplanations()
+      } catch {
+        if (cancelled) return
+        setError('Could not load connections.')
+        setLoading(false)
+      }
+    }
+
+    function connectForExplanations(attempt = 0) {
+      if (cancelled) return
+
       ws = new WebSocket(`${WS_BASE}/ws/connections/${articleId}`)
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data)
 
-          if (msg.type === 'connections') {
-            receivedInitialMessage = true
-            // Initial graph traversal result — render immediately, no LLM wait.
-            setConnections(msg.data.connections ?? [])
-            setError(null)
-            setLoading(false)
-
-          } else if (msg.type === 'explanation') {
+          if (msg.type === 'explanation') {
             const { article_id, explanation } = msg.data
             setConnections(prev =>
               prev.map(c =>
@@ -66,8 +76,8 @@ export function useConnections(articleId) {
             )
           }
         } catch {
-          setError('Unexpected response from server.')
-          setLoading(false)
+          // Explanations are progressive enhancement; initial connections have
+          // already loaded over HTTP, so ignore malformed stream messages.
         }
       }
 
@@ -78,23 +88,21 @@ export function useConnections(articleId) {
       }
 
       ws.onclose = () => {
-        if (cancelled || receivedInitialMessage) {
-          setLoading(false)
+        if (cancelled) {
           return
         }
 
         const nextAttempt = attempt + 1
-        if (nextAttempt < RETRY_DELAYS_MS.length) {
-          retryTimer = setTimeout(() => connect(nextAttempt), RETRY_DELAYS_MS[nextAttempt])
-          return
+        if (nextAttempt <= WS_RETRY_DELAYS_MS.length) {
+          retryTimer = setTimeout(
+            () => connectForExplanations(nextAttempt),
+            WS_RETRY_DELAYS_MS[nextAttempt - 1],
+          )
         }
-
-        setError('Could not connect to the graph service.')
-        setLoading(false)
       }
     }
 
-    connect()
+    loadInitialConnections()
 
     // Cleanup: close the WebSocket when the component unmounts or articleId
     // changes. This is the React equivalent of "componentWillUnmount".
