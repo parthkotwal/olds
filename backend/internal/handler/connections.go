@@ -49,6 +49,7 @@ func (h *ArticleHandler) Connections(c *gin.Context) {
 	topN := parseIntQuery(c, "top_n", defaultTopN)
 	minWeight := parseFloatQuery(c, "min_weight", defaultMinWeight)
 	crossTopicOnly := parseBoolQuery(c, "cross_topic", false)
+	includeExplanations := parseBoolQuery(c, "explain", false)
 
 	edges := h.connectionEdges(sourceArticle, topN, minWeight)
 
@@ -73,7 +74,9 @@ func (h *ArticleHandler) Connections(c *gin.Context) {
 		})
 	}
 
-	connections = h.enrichWithExplanations(sourceArticle, connections)
+	if includeExplanations {
+		connections = h.enrichWithExplanations(sourceArticle, connections)
+	}
 
 	c.JSON(http.StatusOK, ConnectionsResponse{
 		Source:      toSummary(sourceArticle),
