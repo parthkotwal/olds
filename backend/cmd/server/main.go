@@ -15,6 +15,7 @@ import (
 	"github.com/olds/backend/internal/article"
 	"github.com/olds/backend/internal/behavior"
 	"github.com/olds/backend/internal/db"
+	"github.com/olds/backend/internal/embedclient"
 	"github.com/olds/backend/internal/graph"
 	"github.com/olds/backend/internal/guardian"
 	"github.com/olds/backend/internal/handler"
@@ -129,15 +130,16 @@ func main() {
 	behaviorRepo := repository.NewBehaviorRepository(pool)
 	snapshotRepo := repository.NewSnapshotRepository(pool)
 
-	// LLM client is optional — if LLM_API_KEY is not set, connection explanations
-	// are disabled and the sidebar renders connections without explanation text.
-	// This matches the pattern for mlClient and guardianClient above.
+	// LLM_API_KEY is used for both connection explanations (OpenAI chat) and
+	// embeddings (OpenAI text-embedding-3-small). Both clients share the key.
 	var llmClient *llm.Client
+	var embedClient *embedclient.Client
 	if llmKey := os.Getenv("LLM_API_KEY"); llmKey != "" {
 		llmClient = llm.NewClient(llmKey)
-		log.Println("LLM client configured — connection explanations enabled")
+		embedClient = embedclient.NewClient(llmKey)
+		log.Println("LLM client configured — connection explanations + embeddings enabled")
 	} else {
-		log.Println("LLM_API_KEY not set — connection explanations disabled")
+		log.Println("LLM_API_KEY not set — connection explanations and embeddings disabled")
 	}
 
 	// ── 7. Hydrate in-memory stores from Postgres ─────────────────────────────
@@ -159,7 +161,7 @@ func main() {
 
 	// ── 8. Construct the handler and register routes ──────────────────────────
 	articleHandler := handler.NewArticleHandler(
-		store, client, guardianClient, mlClient, g, bs,
+		store, client, guardianClient, mlClient, embedClient, g, bs,
 		articleRepo, behaviorRepo, snapshotRepo, llmClient,
 	)
 

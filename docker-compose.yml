@@ -23,6 +23,7 @@ services:
       # LLM API key for OpenAI connection explanations (Phase 15).
       # If unset, connections render without explanation text — graceful degradation.
       - LLM_API_KEY=${LLM_API_KEY}
+      - SUPABASE_URL=${SUPABASE_URL}
     depends_on:
       ml-service:
         # Wait until ml-service passes its healthcheck before starting the backend.

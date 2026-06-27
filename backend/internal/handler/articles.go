@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/olds/backend/internal/article"
 	"github.com/olds/backend/internal/behavior"
+	"github.com/olds/backend/internal/embedclient"
 	"github.com/olds/backend/internal/graph"
 	"github.com/olds/backend/internal/guardian"
 	"github.com/olds/backend/internal/llm"
@@ -40,8 +41,11 @@ type ArticleHandler struct {
 	// degrades gracefully: only NewsAPI articles are ingested.
 	guardianClient *guardian.Client
 	// mlClient may be nil if ML_SERVICE_URL is not set — the handler
-	// degrades gracefully: articles are stored without entities/embedding.
-	mlClient      *mlclient.Client
+	// degrades gracefully: articles are stored without entities.
+	mlClient *mlclient.Client
+	// embedClient calls OpenAI's embeddings API. May be nil if LLM_API_KEY
+	// is not set — articles are stored without embeddings.
+	embedClient *embedclient.Client
 	graph         *graph.Graph
 	behaviorStore *behavior.Store
 	// articleRepo and behaviorRepo persist data to Postgres.
@@ -100,18 +104,20 @@ func NewArticleHandler(
 	client *newsapi.Client,
 	guardianClient *guardian.Client,
 	mlClient *mlclient.Client,
+	embedClient *embedclient.Client,
 	g *graph.Graph,
 	bs *behavior.Store,
 	articleRepo repository.ArticleRepository,
 	behaviorRepo repository.BehaviorRepository,
 	snapshotRepo repository.SnapshotRepository,
-	llmClient *llm.Client, // may be nil — LLM explanations are optional
+	llmClient *llm.Client,
 ) *ArticleHandler {
 	return &ArticleHandler{
 		store:            store,
 		client:           client,
 		guardianClient:   guardianClient,
 		mlClient:         mlClient,
+		embedClient:      embedClient,
 		graph:            g,
 		behaviorStore:    bs,
 		articleRepo:      articleRepo,
