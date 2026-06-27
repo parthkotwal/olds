@@ -75,7 +75,7 @@ function buildGraph(article, connections) {
   return { width, height, nodes, edges }
 }
 
-export default function ConnectionGraphView({ article, onBack, onArticleClick }) {
+export default function ConnectionGraphView({ article, onShowSource, onArticleClick }) {
   const { connections, loading, error } = useConnections(article.id)
   const [selectedId, setSelectedId] = useState(null)
 
@@ -84,26 +84,6 @@ export default function ConnectionGraphView({ article, onBack, onArticleClick })
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onBack}
-            className="label-caps text-muted hover:text-ink transition-colors duration-150"
-          >
-            Article
-          </button>
-          <span className="text-muted text-xs">/</span>
-          <span className="label-caps text-muted">Connection graph</span>
-        </div>
-        <button
-          onClick={() => onArticleClick(article)}
-          className="label-caps text-ink bg-accent px-4 py-2 hover:opacity-80 transition-opacity"
-          style={{ fontSize: '0.62rem' }}
-        >
-          Read source
-        </button>
-      </div>
-
       <section className="border-y border-rule py-5 mb-6">
         <div className="editorial-label text-ink mb-2">Graph Explorer</div>
         <h1
@@ -112,6 +92,13 @@ export default function ConnectionGraphView({ article, onBack, onArticleClick })
         >
           {article.title}
         </h1>
+        <button
+          onClick={onShowSource}
+          className="label-caps text-muted hover:text-ink transition-colors mt-3"
+          style={{ fontSize: '0.62rem' }}
+        >
+          Back to source article
+        </button>
       </section>
 
       {loading && (
