@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { fetchConnections } from '../api/articles.js'
+import { fetchConnectionExplanations, fetchConnections } from '../api/articles.js'
 
 // Derive the WebSocket base URL from the same VITE_API_BASE_URL env var
 // used by the REST API client. We just swap the protocol:
@@ -54,10 +54,45 @@ export function useConnections(articleId) {
         setError(null)
         setLoading(false)
         connectForExplanations()
+        loadExplanationFallback()
       } catch {
         if (cancelled) return
         setError('Could not load connections.')
         setLoading(false)
+      }
+    }
+
+    async function loadExplanationFallback() {
+      try {
+        const data = await fetchConnectionExplanations(articleId)
+        if (cancelled) return
+
+        const explanationsById = new Map(
+          (data.connections ?? [])
+            .filter(connection => connection.explanation)
+            .map(connection => [connection.article.id, connection.explanation])
+        )
+
+        setConnections(prev =>
+          prev.map(connection => {
+            const explanation = explanationsById.get(connection.article.id)
+            return {
+              ...connection,
+              explanation: connection.explanation ?? explanation,
+              explanation_pending: false,
+              explanation_unavailable: !connection.explanation && !explanation,
+            }
+          })
+        )
+      } catch {
+        if (cancelled) return
+        setConnections(prev =>
+          prev.map(connection => ({
+            ...connection,
+            explanation_pending: false,
+            explanation_unavailable: !connection.explanation,
+          }))
+        )
       }
     }
 
@@ -78,10 +113,6 @@ export function useConnections(articleId) {
                   ? { ...c, explanation, explanation_pending: false }
                   : c
               )
-            )
-          } else if (msg.type === 'explanations_done') {
-            setConnections(prev =>
-              prev.map(c => ({ ...c, explanation_pending: false }))
             )
           }
         } catch {
@@ -115,10 +146,14 @@ export function useConnections(articleId) {
     const pendingFallback = setTimeout(() => {
       if (!cancelled) {
         setConnections(prev =>
-          prev.map(c => ({ ...c, explanation_pending: false }))
+          prev.map(c => ({
+            ...c,
+            explanation_pending: false,
+            explanation_unavailable: !c.explanation,
+          }))
         )
       }
-    }, 20000)
+    }, 45000)
 
     // Cleanup: close the WebSocket when the component unmounts or articleId
     // changes. This is the React equivalent of "componentWillUnmount".

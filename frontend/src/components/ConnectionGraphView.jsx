@@ -247,7 +247,16 @@ export default function ConnectionGraphView({ article, onShowSource, onArticleCl
                     className="label-caps text-faint border-y border-rule py-3 mb-4"
                     style={{ fontSize: '0.55rem', lineHeight: 1.5 }}
                   >
-                    GPT-5-nano explanation loading…
+                    Olds explanation loading...
+                  </div>
+                )}
+
+                {!selectedConnection.explanation && selectedConnection.explanation_unavailable && (
+                  <div
+                    className="label-caps text-faint border-y border-rule py-3 mb-4"
+                    style={{ fontSize: '0.55rem', lineHeight: 1.5 }}
+                  >
+                    Explanation unavailable
                   </div>
                 )}
 
