@@ -150,16 +150,10 @@ func main() {
 	// Non-fatal: if hydration fails (e.g., fresh DB with no rows), the server
 	// starts with empty stores. The startup ingestion goroutine (step 9) will
 	// repopulate from the news APIs.
-	log.Println("hydrating in-memory stores from database...")
-	if err := repository.HydrateFromDB(
-		context.Background(),
-		articleRepo, behaviorRepo,
-		store, g, bs,
-	); err != nil {
-		log.Printf("hydration failed (starting with empty stores): %v", err)
-	}
-
-	// ── 8. Construct the handler and register routes ──────────────────────────
+	// ── 7. Construct the handler and register routes ─────────────────────────
+	// Handler is constructed before hydration so the HTTP server can start
+	// immediately. Hydration runs in a background goroutine — the feed is
+	// empty until it completes, but the server is healthy and reachable.
 	articleHandler := handler.NewArticleHandler(
 		store, client, guardianClient, mlClient, embedClient, g, bs,
 		articleRepo, behaviorRepo, snapshotRepo, llmClient,
@@ -245,16 +239,25 @@ func main() {
 	// receives a value every interval — `for range ticker.C` loops on each tick,
 	// equivalent to `setInterval` in JS. defer ticker.Stop() cancels the ticker
 	// when the goroutine exits (never in normal operation, but good practice).
+	// ── Hydrate + ingest in background ───────────────────────────────────────
+	// Hydration and initial ingestion run in a single background goroutine so
+	// the HTTP server starts immediately. The feed is empty until hydration
+	// completes, but health checks pass and Railway doesn't kill the container.
 	go func() {
+		log.Println("hydrating in-memory stores from database...")
+		if err := repository.HydrateFromDB(
+			context.Background(),
+			articleRepo, behaviorRepo,
+			store, g, bs,
+		); err != nil {
+			log.Printf("hydration failed (starting with empty stores): %v", err)
+		}
+
 		log.Println("starting initial article ingestion...")
 		if err := articleHandler.RunScheduledIngest(); err != nil {
-			// Non-fatal: the server stays up with the hydrated store.
-			// The next ticker tick will retry automatically.
 			log.Printf("initial ingestion failed: %v", err)
 		}
 
-		// Parse ingestion interval from env — defaults to 30 minutes.
-		// time.ParseDuration understands "24h", "1h", "5m30s", etc.
 		interval := 24 * time.Hour
 		if v := os.Getenv("INGEST_INTERVAL"); v != "" {
 			if d, err := time.ParseDuration(v); err == nil && d > 0 {

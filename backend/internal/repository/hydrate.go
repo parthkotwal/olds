@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/olds/backend/internal/article"
 	"github.com/olds/backend/internal/behavior"
@@ -40,17 +41,22 @@ func HydrateFromDB(
 	g *graph.Graph,
 	bs *behavior.Store,
 ) error {
-	// ── Step 1 + 2 + 3: articles → store → graph ─────────────────────────────
-	articles, err := articleRepo.LoadAll(ctx)
+	// Use a timeout so hydration doesn't block startup indefinitely.
+	// graph.Add is O(n²) on article count — at scale this can take minutes.
+	hydrateCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	articles, err := articleRepo.LoadAll(hydrateCtx)
 	if err != nil {
 		return fmt.Errorf("load articles from DB: %w", err)
 	}
 
 	if len(articles) > 0 {
 		store.Add(articles)
+		log.Printf("hydrate: loaded %d articles into store, building graph...", len(articles))
 		g.Add(articles)
-		log.Printf("hydrate: loaded %d articles, graph: %d nodes / %d edges",
-			len(articles), g.NodeCount(), g.EdgeCount())
+		log.Printf("hydrate: graph built — %d nodes / %d edges",
+			g.NodeCount(), g.EdgeCount())
 	} else {
 		log.Println("hydrate: no articles in database — starting fresh")
 	}
