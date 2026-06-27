@@ -52,13 +52,13 @@ flowchart LR
 
 | Metric | Value |
 |--------|-------|
-| Articles indexed | 11,000+ |
-| Graph edges | 160,000+ |
-| Cross-topic connection rate | ~68% |
-| Enrichment success rate | >95% |
-| Graph traversal latency | p50/p95/p99 exposed at `/metrics` |
-| WebSocket push latency | p50/p95/p99 exposed at `/metrics` |
-| ML inference per article (median) | 565 ms |
+| Articles indexed | 11,464 |
+| Graph edges | 953,251 unique edges |
+| Cross-topic connection rate | 59.0% |
+| Enrichment success rate | 83.5% |
+| Graph traversal latency | p50 382 ms / p95 819 ms / p99 819 ms |
+| WebSocket push latency | p50 0 ms / p95 0 ms / p99 0 ms |
+| ML inference per article | p50 699 ms / p95 2,795 ms / p99 5,606 ms |
 
 Runtime metrics are exposed through `GET /metrics`, including article count,
 graph edge count, cross-topic ratio, latency percentiles, ingestion counts, and
