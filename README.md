@@ -2,6 +2,8 @@
 
 **A news reader that show you non-obvious connections between stories across topics.**
 
+[![CI](https://github.com/parthkotwal/olds/actions/workflows/ci.yml/badge.svg)](https://github.com/parthkotwal/olds/actions/workflows/ci.yml)
+
 🌐 [**readolds.fyi**](https://readolds.fyi)
 
 ---
@@ -50,13 +52,18 @@ flowchart LR
 
 | Metric | Value |
 |--------|-------|
-| Articles indexed | 500+ |
+| Articles indexed | 11,000+ |
 | Graph edges | 160,000+ |
 | Cross-topic connection rate | ~68% |
 | Enrichment success rate | >95% |
-| Graph traversal (median) | TBD<!-- TODO: fill from /stats after 1 week --> |
-| WebSocket push latency (median) | TBD<!-- TODO: fill from /stats after 1 week --> |
+| Graph traversal latency | p50/p95/p99 exposed at `/metrics` |
+| WebSocket push latency | p50/p95/p99 exposed at `/metrics` |
 | ML inference per article (median) | 565 ms |
+
+Runtime metrics are exposed through `GET /metrics`, including article count,
+graph edge count, cross-topic ratio, latency percentiles, ingestion counts, and
+LLM explanation cache size. Detailed historical snapshots remain behind
+authenticated `/stats` endpoints.
 
 ## Local development
 

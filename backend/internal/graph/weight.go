@@ -61,6 +61,42 @@ func edgeWeight(a, b article.Article) float64 {
 	return 0.6*cosine + 0.4*jaccard
 }
 
+// Breakdown explains the two components that produced an edge weight.
+// It is returned to the frontend for the "why connected" UI.
+type Breakdown struct {
+	Weight             float64  `json:"weight"`
+	SemanticSimilarity float64  `json:"semantic_similarity"`
+	EntityOverlap      float64  `json:"entity_overlap"`
+	SemanticPct        float64  `json:"semantic_pct"`
+	EntityPct          float64  `json:"entity_pct"`
+	SharedEntities     []string `json:"shared_entities"`
+}
+
+// Explain returns the raw semantic/entity scores and each component's
+// contribution to the final weighted edge score.
+func Explain(a, b article.Article) Breakdown {
+	cosine := cosineSimilarity(a.Embedding, b.Embedding)
+	jaccard := entityJaccard(a.Entities, b.Entities)
+	semanticContribution := 0.6 * cosine
+	entityContribution := 0.4 * jaccard
+	weight := semanticContribution + entityContribution
+
+	var semanticPct, entityPct float64
+	if weight > 0 {
+		semanticPct = semanticContribution / weight * 100
+		entityPct = entityContribution / weight * 100
+	}
+
+	return Breakdown{
+		Weight:             weight,
+		SemanticSimilarity: cosine,
+		EntityOverlap:      jaccard,
+		SemanticPct:        semanticPct,
+		EntityPct:          entityPct,
+		SharedEntities:     SharedEntities(a, b),
+	}
+}
+
 // cosineSimilarity computes the cosine similarity between two float64 vectors.
 //
 // Cosine similarity = dot(a,b) / (|a| × |b|)

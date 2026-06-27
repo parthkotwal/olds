@@ -24,18 +24,28 @@ function weightLabel(w) {
   return 'weak'
 }
 
+function pct(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '0%'
+  return `${Math.round(value)}%`
+}
+
+function score(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '0.00'
+  return value.toFixed(2)
+}
+
 /**
  * A single connection entry in the sidebar.
  * Rendered as text-only marginalia — no cards, no borders, no shadows.
  * The cross-topic badge is the visual highlight when the connection crosses categories.
  */
 function ConnectionEntry({ connection, onArticleClick }) {
-  const { article, weight, cross_topic, explanation } = connection
+  const { article, weight, cross_topic, explanation, breakdown } = connection
+  const sharedEntities = breakdown?.shared_entities ?? []
 
   return (
-    <button
-      onClick={() => onArticleClick?.(article)}
-      className="w-full text-left group"
+    <article
+      className="w-full"
       style={{ paddingBottom: '1rem', marginBottom: '1rem', borderBottom: '1px solid var(--color-rule)' }}
     >
       {/* Category + cross-topic badge */}
@@ -60,8 +70,9 @@ function ConnectionEntry({ connection, onArticleClick }) {
       </div>
 
       {/* Headline — serif, quiet hover */}
-      <p
-        className="font-display text-ink leading-snug group-hover:opacity-70 transition-opacity duration-150"
+      <button
+        onClick={() => onArticleClick?.(article)}
+        className="w-full text-left font-display text-ink leading-snug hover:opacity-70 transition-opacity duration-150"
         style={{
           fontSize: '0.86rem',
           fontWeight: 400,
@@ -73,7 +84,7 @@ function ConnectionEntry({ connection, onArticleClick }) {
         }}
       >
         {article.title}
-      </p>
+      </button>
 
       {/* LLM-generated explanation — streams in after the initial connection
           render via a separate WebSocket message. */}
@@ -93,6 +104,53 @@ function ConnectionEntry({ connection, onArticleClick }) {
         </p>
       )}
 
+      {breakdown && (
+        <details className="mt-2 group/why">
+          <summary
+            className="label-caps text-muted cursor-pointer hover:text-ink transition-colors"
+            style={{ fontSize: '0.55rem', listStyle: 'none' }}
+          >
+            Why connected
+          </summary>
+          <div className="mt-2 pt-2 border-t border-rule">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+              <div>
+                <div className="label-caps text-faint" style={{ fontSize: '0.5rem' }}>
+                  Semantic
+                </div>
+                <div className="font-display text-ink" style={{ fontSize: '0.78rem' }}>
+                  {pct(breakdown.semantic_pct)}
+                </div>
+              </div>
+              <div>
+                <div className="label-caps text-faint" style={{ fontSize: '0.5rem' }}>
+                  Entities
+                </div>
+                <div className="font-display text-ink" style={{ fontSize: '0.78rem' }}>
+                  {pct(breakdown.entity_pct)}
+                </div>
+              </div>
+            </div>
+            <div className="mt-2 label-caps text-muted" style={{ fontSize: '0.5rem', lineHeight: 1.5 }}>
+              Score {score(breakdown.weight)} · Cosine {score(breakdown.semantic_similarity)} · Overlap {score(breakdown.entity_overlap)}
+            </div>
+            {sharedEntities.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {sharedEntities.slice(0, 5).map(entity => (
+                  <span
+                    key={entity}
+                    className="label-caps text-ink bg-warm border border-rule px-1.5 py-0.5"
+                    style={{ fontSize: '0.5rem', letterSpacing: '0.05em' }}
+                  >
+                    {entity}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </details>
+      )}
+
       {/* Source + weight tier */}
       <div className="flex items-center justify-between mt-1.5">
         <span className="text-muted" style={{ fontSize: '0.6rem' }}>
@@ -106,7 +164,7 @@ function ConnectionEntry({ connection, onArticleClick }) {
           {weightLabel(weight)}
         </span>
       </div>
-    </button>
+    </article>
   )
 }
 

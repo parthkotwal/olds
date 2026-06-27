@@ -69,6 +69,7 @@ func (h *ArticleHandler) WSConnections(c *gin.Context) {
 			Article:    toSummary(neighbour),
 			Weight:     edge.Weight,
 			CrossTopic: neighbour.Category != sourceArticle.Category,
+			Breakdown:  graph.Explain(sourceArticle, neighbour),
 		})
 	}
 

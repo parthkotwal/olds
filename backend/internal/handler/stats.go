@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/olds/backend/internal/timing"
 )
 
 // Stats returns a comprehensive JSON snapshot of system metrics.
@@ -77,31 +78,11 @@ func (h *ArticleHandler) Stats(c *gin.Context) {
 	// Each Percentile() call copies the current window and sorts — O(N log N)
 	// where N ≤ 1,000. Acceptable for an on-demand endpoint.
 	perfSection := gin.H{
-		"graph_traversal_ms": gin.H{
-			"p50":     h.traversalTimings.Percentile(50).Milliseconds(),
-			"p95":     h.traversalTimings.Percentile(95).Milliseconds(),
-			"samples": h.traversalTimings.Count(),
-		},
-		"ws_push_ms": gin.H{
-			"p50":     h.wsPushTimings.Percentile(50).Milliseconds(),
-			"p95":     h.wsPushTimings.Percentile(95).Milliseconds(),
-			"samples": h.wsPushTimings.Count(),
-		},
-		"ml_infer_ms": gin.H{
-			"p50":     h.mlInferTimings.Percentile(50).Milliseconds(),
-			"p95":     h.mlInferTimings.Percentile(95).Milliseconds(),
-			"samples": h.mlInferTimings.Count(),
-		},
-		"llm_explain_ms": gin.H{
-			"p50":     h.llmExplainTimings.Percentile(50).Milliseconds(),
-			"p95":     h.llmExplainTimings.Percentile(95).Milliseconds(),
-			"samples": h.llmExplainTimings.Count(),
-		},
-		"ingest_total_ms": gin.H{
-			"p50":     h.ingestTotalTimings.Percentile(50).Milliseconds(),
-			"p95":     h.ingestTotalTimings.Percentile(95).Milliseconds(),
-			"samples": h.ingestTotalTimings.Count(),
-		},
+		"graph_traversal_ms": timingSummary(&h.traversalTimings),
+		"ws_push_ms":         timingSummary(&h.wsPushTimings),
+		"ml_infer_ms":        timingSummary(&h.mlInferTimings),
+		"llm_explain_ms":     timingSummary(&h.llmExplainTimings),
+		"ingest_total_ms":    timingSummary(&h.ingestTotalTimings),
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -112,13 +93,13 @@ func (h *ArticleHandler) Stats(c *gin.Context) {
 			"decay":       decaySnapshot,
 		},
 		"ingestion": gin.H{
-			"run_count":                  runCount,
-			"last_run_at":                lastAtStr,
-			"last_run_articles":          lastCount,
-			"total_ml_attempts":          mlAttempts,
-			"total_ml_successes":         mlSuccesses,
+			"run_count":                   runCount,
+			"last_run_at":                 lastAtStr,
+			"last_run_articles":           lastCount,
+			"total_ml_attempts":           mlAttempts,
+			"total_ml_successes":          mlSuccesses,
 			"enrichment_success_rate_pct": enrichmentSuccessRatePct,
-			"articles_per_day_7d":        articlesPerDay7d,
+			"articles_per_day_7d":         articlesPerDay7d,
 		},
 		"performance": perfSection,
 		"connection_quality": gin.H{
@@ -128,6 +109,57 @@ func (h *ArticleHandler) Stats(c *gin.Context) {
 			"explanation_cache_size": h.explanationCache.Size(),
 		},
 	})
+}
+
+// Metrics returns a compact public metrics snapshot for demos, README numbers,
+// and lightweight uptime checks. Detailed history remains behind /stats.
+func (h *ArticleHandler) Metrics(c *gin.Context) {
+	graphStats := h.graph.Stats()
+	mlAttempts := atomic.LoadInt64(&h.mlAttempts)
+	mlSuccesses := atomic.LoadInt64(&h.mlSuccesses)
+	h.ingestMu.Lock()
+	runCount := h.ingestRunCount
+	lastCount := h.lastIngestCount
+	h.ingestMu.Unlock()
+
+	var enrichmentSuccessRatePct float64
+	if mlAttempts > 0 {
+		enrichmentSuccessRatePct = float64(mlSuccesses) / float64(mlAttempts) * 100
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"articles_indexed": h.store.Count(),
+		"graph": gin.H{
+			"nodes":                 graphStats.NodeCount,
+			"unique_edges":          graphStats.UniqueEdges,
+			"directed_edges":        graphStats.DirectedEdges,
+			"avg_edges_per_node":    graphStats.AvgEdgesPerNode,
+			"density_pct":           graphStats.DensityPct,
+			"cross_topic_ratio_pct": graphStats.CrossTopicRatioPct,
+		},
+		"latency_ms": gin.H{
+			"graph_traversal": timingSummary(&h.traversalTimings),
+			"websocket_push":  timingSummary(&h.wsPushTimings),
+			"ml_inference":    timingSummary(&h.mlInferTimings),
+			"llm_explanation": timingSummary(&h.llmExplainTimings),
+			"ingestion_total": timingSummary(&h.ingestTotalTimings),
+		},
+		"ingestion": gin.H{
+			"run_count":                   runCount,
+			"last_run_articles":           lastCount,
+			"enrichment_success_rate_pct": enrichmentSuccessRatePct,
+		},
+		"explanation_cache_size": h.explanationCache.Size(),
+	})
+}
+
+func timingSummary(b *timing.Buffer) gin.H {
+	return gin.H{
+		"p50":     b.Percentile(50).Milliseconds(),
+		"p95":     b.Percentile(95).Milliseconds(),
+		"p99":     b.Percentile(99).Milliseconds(),
+		"samples": b.Count(),
+	}
 }
 
 // StatsHistory handles GET /stats/history.

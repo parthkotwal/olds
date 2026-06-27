@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/olds/backend/internal/graph"
 )
 
 const defaultTopN = 10
@@ -14,10 +15,11 @@ const defaultMinWeight = 0.1
 // Uses ArticleSummary instead of the full Article to avoid sending
 // raw_text, entities, and embedding vectors to the frontend.
 type Connection struct {
-	Article     ArticleSummary `json:"article"`
-	Weight      float64        `json:"weight"`
-	CrossTopic  bool           `json:"cross_topic"`
-	Explanation string         `json:"explanation,omitempty"`
+	Article     ArticleSummary  `json:"article"`
+	Weight      float64         `json:"weight"`
+	CrossTopic  bool            `json:"cross_topic"`
+	Breakdown   graph.Breakdown `json:"breakdown"`
+	Explanation string          `json:"explanation,omitempty"`
 }
 
 type ConnectionsResponse struct {
@@ -66,6 +68,7 @@ func (h *ArticleHandler) Connections(c *gin.Context) {
 			Article:    toSummary(neighbourArticle),
 			Weight:     edge.Weight,
 			CrossTopic: isCrossTopic,
+			Breakdown:  graph.Explain(sourceArticle, neighbourArticle),
 		})
 	}
 

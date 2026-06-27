@@ -196,6 +196,7 @@ func main() {
 	r.GET("/articles/:id", articleHandler.GetByID)
 	r.GET("/articles/:id/connections", articleHandler.Connections)
 	r.GET("/ws/connections/:id", articleHandler.WSConnections)
+	r.GET("/metrics", articleHandler.Metrics)
 	r.POST("/ingest", articleHandler.Ingest)
 
 	// ── Protected routes — valid Supabase JWT required ────────────────────────
