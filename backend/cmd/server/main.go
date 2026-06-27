@@ -142,18 +142,10 @@ func main() {
 		log.Println("LLM_API_KEY not set — connection explanations and embeddings disabled")
 	}
 
-	// ── 7. Hydrate in-memory stores from Postgres ─────────────────────────────
-	// HydrateFromDB runs synchronously before the HTTP server starts so that
-	// the very first request sees the full persisted state. The sequence is:
-	//   LoadAll → store.Add → graph.Add → LoadSignals → bs.BulkLoad
-	//
-	// Non-fatal: if hydration fails (e.g., fresh DB with no rows), the server
-	// starts with empty stores. The startup ingestion goroutine (step 9) will
-	// repopulate from the news APIs.
 	// ── 7. Construct the handler and register routes ─────────────────────────
 	// Handler is constructed before hydration so the HTTP server can start
-	// immediately. Hydration runs in a background goroutine — the feed is
-	// empty until it completes, but the server is healthy and reachable.
+	// immediately. Article read routes wait briefly for hydration, while
+	// /health stays available for Railway startup checks.
 	articleHandler := handler.NewArticleHandler(
 		store, client, guardianClient, mlClient, embedClient, g, bs,
 		articleRepo, behaviorRepo, snapshotRepo, llmClient,
@@ -253,6 +245,7 @@ func main() {
 		); err != nil {
 			log.Printf("hydration failed (starting with empty stores): %v", err)
 		}
+		articleHandler.MarkHydrated()
 
 		log.Println("starting initial article ingestion...")
 		if err := articleHandler.RunScheduledIngest(); err != nil {

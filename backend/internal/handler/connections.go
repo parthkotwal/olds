@@ -28,6 +28,10 @@ type ConnectionsResponse struct {
 
 // Connections handles GET /articles/:id/connections.
 func (h *ArticleHandler) Connections(c *gin.Context) {
+	if !h.waitForHydration(c) {
+		return
+	}
+
 	id := c.Param("id")
 
 	sourceArticle, ok := h.store.GetByID(id)

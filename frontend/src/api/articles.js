@@ -1,4 +1,68 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080').replace(/\/$/, '')
+
+const REQUEST_TIMEOUT_MS = 8000
+const LIST_RETRY_DELAYS_MS = [250, 750, 1500, 3000]
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function isTransientStatus(status) {
+  return status === 408 || status === 425 || status === 429 || (status >= 500 && status <= 504)
+}
+
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function fetchJsonWithRetry(url, {
+  retryDelays = LIST_RETRY_DELAYS_MS,
+  shouldRetryData = () => false,
+} = {}) {
+  let lastError
+
+  for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+    try {
+      const response = await fetchWithTimeout(url, {
+        headers: { Accept: 'application/json' },
+      })
+
+      if (!response.ok) {
+        const error = new Error(`Backend returned ${response.status} ${response.statusText}`)
+        error.status = response.status
+        throw error
+      }
+
+      const data = await response.json()
+      if (!shouldRetryData(data) || attempt === retryDelays.length) {
+        return data
+      }
+
+      lastError = new Error('Backend returned an empty feed while warming up')
+    } catch (error) {
+      lastError = error
+
+      const canRetryStatus = error.status == null || isTransientStatus(error.status)
+      if (!canRetryStatus || attempt === retryDelays.length) {
+        throw error
+      }
+    }
+
+    await sleep(retryDelays[attempt])
+  }
+
+  throw lastError
+}
 
 /**
  * Fetch a page of articles from the backend.
@@ -15,13 +79,15 @@ export async function fetchArticles({ category = '', page = 1, pageSize = 30 } =
   params.set('page', String(page))
   params.set('page_size', String(pageSize))
 
-  const response = await fetch(`${API_BASE}/articles?${params}`)
+  const data = await fetchJsonWithRetry(`${API_BASE}/articles?${params}`, {
+    shouldRetryData: responseData => (
+      page === 1
+      && !category
+      && (responseData.total ?? 0) === 0
+      && (responseData.articles ?? []).length === 0
+    ),
+  })
 
-  if (!response.ok) {
-    throw new Error(`Backend returned ${response.status} ${response.statusText}`)
-  }
-
-  const data = await response.json()
   return {
     articles: data.articles ?? [],
     total: data.total ?? 0,
@@ -33,11 +99,7 @@ export async function fetchArticles({ category = '', page = 1, pageSize = 30 } =
  * Fetch a single article with full detail (raw_text, entities).
  */
 export async function fetchArticleById(id) {
-  const response = await fetch(`${API_BASE}/articles/${encodeURIComponent(id)}`)
-
-  if (!response.ok) {
-    throw new Error(`Backend returned ${response.status} ${response.statusText}`)
-  }
-
-  return response.json()
+  return fetchJsonWithRetry(`${API_BASE}/articles/${encodeURIComponent(id)}`, {
+    retryDelays: [250, 750, 1500],
+  })
 }

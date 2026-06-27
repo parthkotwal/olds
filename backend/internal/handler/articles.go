@@ -45,7 +45,7 @@ type ArticleHandler struct {
 	mlClient *mlclient.Client
 	// embedClient calls OpenAI's embeddings API. May be nil if LLM_API_KEY
 	// is not set — articles are stored without embeddings.
-	embedClient *embedclient.Client
+	embedClient   *embedclient.Client
 	graph         *graph.Graph
 	behaviorStore *behavior.Store
 	// articleRepo and behaviorRepo persist data to Postgres.
@@ -64,6 +64,12 @@ type ArticleHandler struct {
 	// the same pair is never sent to OpenAI more than once per process lifetime.
 	explanationCache *llm.ExplanationCache
 
+	// hydrationReady is closed once startup hydration from Postgres has
+	// completed or failed. Article reads wait on it briefly so a cold backend
+	// does not serve an empty feed while the in-memory store is still loading.
+	hydrationReady chan struct{}
+	hydrationOnce  sync.Once
+
 	// Ingestion telemetry — guarded by ingestMu so the /stats handler can
 	// safely read these from a different goroutine than the ingestion goroutine.
 	ingestMu        sync.Mutex
@@ -75,10 +81,10 @@ type ArticleHandler struct {
 
 	// Phase 17: latency ring buffers (rolling window of last 1,000 samples each).
 	// timing.Buffer has its own internal mutex — safe for concurrent access.
-	traversalTimings  timing.Buffer // graph Neighbors() call duration
-	wsPushTimings     timing.Buffer // WebSocket "connections" message write duration
-	mlInferTimings    timing.Buffer // ML service Analyze() call duration
-	llmExplainTimings timing.Buffer // LLM Explain() call duration
+	traversalTimings   timing.Buffer // graph Neighbors() call duration
+	wsPushTimings      timing.Buffer // WebSocket "connections" message write duration
+	mlInferTimings     timing.Buffer // ML service Analyze() call duration
+	llmExplainTimings  timing.Buffer // LLM Explain() call duration
 	ingestTotalTimings timing.Buffer // full ingest cycle: fetch → enrich → graph.Add()
 
 	// ML enrichment success counters — updated with sync/atomic in enrich() goroutines.
@@ -125,7 +131,47 @@ func NewArticleHandler(
 		snapshotRepo:     snapshotRepo,
 		llmClient:        llmClient,
 		explanationCache: llm.NewExplanationCache(),
+		hydrationReady:   make(chan struct{}),
 	}
+}
+
+// MarkHydrated releases article reads that were waiting for startup hydration.
+// It is safe to call more than once.
+func (h *ArticleHandler) MarkHydrated() {
+	h.hydrationOnce.Do(func() {
+		close(h.hydrationReady)
+	})
+}
+
+func (h *ArticleHandler) waitForHydration(c *gin.Context) bool {
+	select {
+	case <-h.hydrationReady:
+		return true
+	default:
+	}
+
+	timer := time.NewTimer(15 * time.Second)
+	defer timer.Stop()
+
+	select {
+	case <-h.hydrationReady:
+		return true
+	case <-timer.C:
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "article store is warming up",
+		})
+		return false
+	case <-c.Request.Context().Done():
+		return false
+	}
+}
+
+func (h *ArticleHandler) waitForArticleStore(c *gin.Context) bool {
+	if h.store.Count() > 0 {
+		return true
+	}
+
+	return h.waitForHydration(c)
 }
 
 // enrichWithExplanations populates the Explanation field on each Connection
@@ -251,6 +297,10 @@ func toDetail(a article.Article) ArticleDetail {
 
 // GetByID handles GET /articles/:id — returns a single article with full detail.
 func (h *ArticleHandler) GetByID(c *gin.Context) {
+	if !h.waitForArticleStore(c) {
+		return
+	}
+
 	id := c.Param("id")
 	a, ok := h.store.GetByID(id)
 	if !ok {
@@ -266,6 +316,10 @@ const defaultPageSize = 30
 // Supports pagination via ?page= (1-indexed, default 1) and ?page_size= (default 30).
 // Optionally filters by ?category=.
 func (h *ArticleHandler) List(c *gin.Context) {
+	if !h.waitForArticleStore(c) {
+		return
+	}
+
 	category := c.Query("category")
 
 	var articles []article.Article

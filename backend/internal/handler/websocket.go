@@ -27,6 +27,10 @@ type explanationUpdate struct {
 
 // WSConnections handles GET /ws/connections/:id.
 func (h *ArticleHandler) WSConnections(c *gin.Context) {
+	if !h.waitForHydration(c) {
+		return
+	}
+
 	id := c.Param("id")
 
 	sourceArticle, ok := h.store.GetByID(id)
