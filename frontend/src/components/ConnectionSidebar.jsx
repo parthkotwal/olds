@@ -40,7 +40,7 @@ function score(value) {
  * The cross-topic badge is the visual highlight when the connection crosses categories.
  */
 function ConnectionEntry({ connection, onArticleClick }) {
-  const { article, weight, cross_topic, explanation, breakdown } = connection
+  const { article, weight, cross_topic, explanation, explanation_pending, breakdown } = connection
   const sharedEntities = breakdown?.shared_entities ?? []
 
   return (
@@ -102,6 +102,15 @@ function ConnectionEntry({ connection, onArticleClick }) {
         >
           {explanation}
         </p>
+      )}
+
+      {!explanation && explanation_pending && (
+        <div
+          className="label-caps text-faint mt-2 pt-2 border-t border-rule"
+          style={{ fontSize: '0.52rem', lineHeight: 1.5 }}
+        >
+          GPT-5-nano explanation loading…
+        </div>
       )}
 
       {breakdown && (

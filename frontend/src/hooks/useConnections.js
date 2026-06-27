@@ -47,7 +47,10 @@ export function useConnections(articleId) {
       try {
         const data = await fetchConnections(articleId)
         if (cancelled) return
-        setConnections(data.connections ?? [])
+        setConnections((data.connections ?? []).map(connection => ({
+          ...connection,
+          explanation_pending: true,
+        })))
         setError(null)
         setLoading(false)
         connectForExplanations()
@@ -71,8 +74,14 @@ export function useConnections(articleId) {
             const { article_id, explanation } = msg.data
             setConnections(prev =>
               prev.map(c =>
-                c.article.id === article_id ? { ...c, explanation } : c
+                c.article.id === article_id
+                  ? { ...c, explanation, explanation_pending: false }
+                  : c
               )
+            )
+          } else if (msg.type === 'explanations_done') {
+            setConnections(prev =>
+              prev.map(c => ({ ...c, explanation_pending: false }))
             )
           }
         } catch {
@@ -103,6 +112,13 @@ export function useConnections(articleId) {
     }
 
     loadInitialConnections()
+    const pendingFallback = setTimeout(() => {
+      if (!cancelled) {
+        setConnections(prev =>
+          prev.map(c => ({ ...c, explanation_pending: false }))
+        )
+      }
+    }, 20000)
 
     // Cleanup: close the WebSocket when the component unmounts or articleId
     // changes. This is the React equivalent of "componentWillUnmount".
@@ -110,6 +126,7 @@ export function useConnections(articleId) {
     // backend holding a goroutine open per article viewed.
     return () => {
       cancelled = true
+      clearTimeout(pendingFallback)
       if (retryTimer) clearTimeout(retryTimer)
       if (ws) ws.close()
     }

@@ -233,6 +233,24 @@ export default function ConnectionGraphView({ article, onShowSource, onArticleCl
                   Weight {score(selectedConnection.weight)} · Cosine {score(selectedConnection.breakdown?.semantic_similarity)} · Overlap {score(selectedConnection.breakdown?.entity_overlap)}
                 </div>
 
+                {selectedConnection.explanation && (
+                  <p
+                    className="text-muted border-y border-rule py-3 mb-4"
+                    style={{ fontSize: '0.75rem', fontStyle: 'italic', lineHeight: 1.55 }}
+                  >
+                    {selectedConnection.explanation}
+                  </p>
+                )}
+
+                {!selectedConnection.explanation && selectedConnection.explanation_pending && (
+                  <div
+                    className="label-caps text-faint border-y border-rule py-3 mb-4"
+                    style={{ fontSize: '0.55rem', lineHeight: 1.5 }}
+                  >
+                    GPT-5-nano explanation loading…
+                  </div>
+                )}
+
                 {(selectedConnection.breakdown?.shared_entities ?? []).length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
                     {selectedConnection.breakdown.shared_entities.slice(0, 12).map(entity => (
